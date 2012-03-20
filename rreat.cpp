@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <windows.h>
+#include <psapi.h>
 #include "rreat.h"
 
 #define assert(expr) if((expr) == 0) EXITERR("%s", #expr)
