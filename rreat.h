@@ -1,6 +1,8 @@
 #ifndef __RREAT__
 #define __RREAT__
 
+#include "config.h"
+
 typedef unsigned long addr_t;
 
 struct _rreat;
