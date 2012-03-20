@@ -83,6 +83,7 @@ rreat_t *rreat_process_init(const char *filename)
 		NULL, NULL, &si, &pi));
 	rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
 	assert(p);
+	p->process_id = pi.dwProcessId;
 	p->handle = pi.hProcess;
 	rreat_thread_init(p, pi.hThread);
 	return p;
@@ -102,24 +103,38 @@ rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle)
 	return t;
 }
 
+// resume a thread
+void rreat_thread_resume(rreat_t *rr, int thread_id)
+{
+	assert(thread_id >= 0 && thread_id < rr->thread_count);
+	assert(ResumeThread(rr->threads[thread_id].handle) != -1);
+}
+
 // dump a series of pages
 void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
 {
-	MEMORY_BASIC_INFORMATION mbi;
-	assert(VirtualQueryEx(rr->handle, (void *) base_addr, &mbi,
-		sizeof(mbi)) == sizeof(mbi));
-	// we don't need the size from what's before AllocationBase
-	int size = (addr_t) mbi.BaseAddress - (addr_t) mbi.AllocationBase +
-		mbi.RegionSize;
-	void *mem = VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE,
+	MODULEINFO mi = {};
+	assert(GetModuleInformation(rr->handle, (HMODULE) base_addr, &mi,
+	    sizeof(mi)));
+	void *mem = VirtualAlloc(NULL, mi.SizeOfImage, MEM_COMMIT | MEM_RESERVE,
 		PAGE_READWRITE);
 	assert(mem);
-	rreat_read(rr, (addr_t) mbi.AllocationBase, mem, size);
+	rreat_read(rr, (addr_t) mi.lpBaseOfDll, mem, mi.SizeOfImage);
 	FILE *fp = fopen(filename, "wb");
 	assert(fp);
-	fwrite(mem, 1, size, fp);
+	fwrite(mem, 1, mi.SizeOfImage, fp);
 	fclose(fp);
 	assert(VirtualFree(mem, 0, MEM_RELEASE));
+}
+
+// attach JIT Debugger to Process
+void rreat_jitdbg_attach(rreat_t *rr)
+{
+	char path[MAX_PATH];
+	_snprintf(path, sizeofarray(path), RREAT_JITDEBUGGER, rr->process_id);
+	STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
+	CreateProcess(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+	CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
 }
 
 //
@@ -129,76 +144,73 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
 // init new object
 rreat_simulate_t *rreat_simulate_init(rreat_t *rr)
 {
-    rreat_simulate_t *ret = (rreat_simulate_t *) \
-            calloc(1, sizeof(rreat_simulate_t));
-    assert(ret);
-    ret->_rr = rr;
-    return ret;
+	rreat_simulate_t *ret = (rreat_simulate_t *) \
+		calloc(1, sizeof(rreat_simulate_t));
+	assert(ret);
+	ret->_rr = rr;
+	return ret;
 }
 
-// assign address, size and offset (size is the size to copy, offset is the
-// offset where the code will jmp after finishing)
-void rreat_simulate_address(rreat_simulate_t *rr, addr_t addr, int size,
-        int offset)
+// assign start and end address, `wait' will run until `end' is hit.
+void rreat_simulate_address(rreat_simulate_t *rr, addr_t start, addr_t end)
 {
-    assert(size >= 5);
-    rr->addr = addr;
-    rr->size = max(size, offset);
-    rr->offset = offset;
+	assert(end - start >= 5);
+	rr->start = start;
+	rr->end = end;
 }
 
 // apply in the process
 void rreat_simulate_apply(rreat_simulate_t *sim)
 {
-    sim->_mem = rreat_alloc(sim->_rr, sim->size + 2, RREAT_RWX);
-    sim->_backup = malloc(sim->size);
-    // read original code
-    rreat_read(sim->_rr, sim->addr, sim->_backup, sim->size);
-    // write new code with while(1) loop
-    rreat_write(sim->_rr, sim->_mem, sim->_backup, sim->size);
-    rreat_write(sim->_rr, sim->_mem + sim->size, "\xeb\xfe", 2);
-    // write detour jmp
-    unsigned char jmp[5] = {0xe9};
-    *(addr_t *) &jmp[1] = sim->_mem - sim->addr - 5;
-    rreat_write(sim->_rr, sim->addr, jmp, sizeof(jmp));
+	int size = sim->end - sim->start;
+	sim->_mem = rreat_alloc(sim->_rr, size + 2, RREAT_RWX);
+	sim->_backup = malloc(size);
+	// read original code
+	rreat_read(sim->_rr, sim->start, sim->_backup, size);
+	// write new code with while(1) loop
+	rreat_write(sim->_rr, sim->_mem, sim->_backup, size);
+	rreat_write(sim->_rr, sim->_mem + size, "\xeb\xfe", 2);
+	// write detour jmp
+	unsigned char jmp[5] = {0xe9};
+	*(addr_t *) &jmp[1] = sim->_mem - sim->start - 5;
+	rreat_write(sim->_rr, sim->start, jmp, sizeof(jmp));
 }
 
 // wait for a certain thread to finish this `simulation'
 int rreat_simulate_wait(rreat_simulate_t *sim, rreat_thread_t *t,
-        int milliseconds)
+	int milliseconds)
 {
-    unsigned long start = GetTickCount();
-    while (start + milliseconds > GetTickCount()) {
-        assert(SuspendThread(t->handle) != -1);
-        CONTEXT ctx = {CONTEXT_FULL};
-        assert(GetThreadContext(t->handle, &ctx));
-        if(ctx.Eip == sim->_mem + sim->offset) {
-            return RREAT_SUCCESS;
-        }
-        assert(ResumeThread(t->handle) != -1);
-        Sleep(1);
-    }
-    return RREAT_WAIT;
+	unsigned long start = GetTickCount();
+	while (start + milliseconds > GetTickCount()) {
+		assert(SuspendThread(t->handle) != -1);
+		CONTEXT ctx = {CONTEXT_FULL};
+		assert(GetThreadContext(t->handle, &ctx));
+		if(ctx.Eip == sim->_mem + sim->end - sim->start) {
+			return RREAT_SUCCESS;
+		}
+		assert(ResumeThread(t->handle) != -1);
+		Sleep(1);
+	}
+	return RREAT_WAIT;
 }
 
 // restore the thread to the real address
 void rreat_simulate_restore(rreat_simulate_t *sim, rreat_thread_t *t)
 {
-    assert(SuspendThread(t->handle) != -1);
-    CONTEXT ctx = {CONTEXT_FULL};
-    assert(GetThreadContext(t->handle, &ctx));
-    ctx.Eip = sim->addr + sim->offset;
-    assert(SetThreadContext(t->handle, &ctx));
-    assert(ResumeThread(t->handle) != -1);
+	// restore eip
+	CONTEXT ctx = {CONTEXT_FULL};
+	assert(GetThreadContext(t->handle, &ctx));
+	ctx.Eip = sim->end;
+	assert(SetThreadContext(t->handle, &ctx));
+	// restore the original code
+	rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
 }
 
 // free simulate api
 void rreat_simulate_free(rreat_simulate_t *sim)
 {
-    // restore the original code
-    rreat_write(sim->_rr, sim->addr, sim->_backup, sim->size);
-    // free the rest
-    rreat_free(sim->_rr, sim->_mem);
-    free(sim->_backup);
-    free(sim);
+	// free the rest
+	rreat_free(sim->_rr, sim->_mem);
+	free(sim->_backup);
+	free(sim);
 }

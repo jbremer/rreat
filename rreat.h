@@ -8,14 +8,13 @@ typedef unsigned long addr_t;
 struct _rreat;
 
 typedef struct _rreat_simulate_t {
-    addr_t addr;
-    int size;
-	int offset;
+	addr_t start;
+	addr_t end;
 
-    // internal
-    struct _rreat_t *_rr;
-    addr_t _mem;
-    void *_backup;
+	// internal
+	struct _rreat_t *_rr;
+	addr_t _mem;
+	void *_backup;
 } rreat_simulate_t;
 
 typedef struct _rreat_thread_t {
@@ -24,6 +23,7 @@ typedef struct _rreat_thread_t {
 } rreat_thread_t;
 
 typedef struct _rreat_t {
+	int process_id;
     HANDLE handle;
 	int thread_count;
 	rreat_thread_t *threads;
@@ -64,8 +64,14 @@ rreat_t *rreat_process_init(const char *filename);
 // create a new thread object
 rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle);
 
+// resume a thread
+void rreat_thread_resume(rreat_t *rr, int thread_id);
+
 // dump a series of pages
 void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename);
+
+// attach JIT Debugger to Process
+void rreat_jitdbg_attach(rreat_t *rr);
 
 //
 // RREAT Simulate API
@@ -76,10 +82,8 @@ rreat_simulate_t *rreat_simulate_init(rreat_t *rr);
 void rreat_simulate_address(rreat_simulate_t *rr, addr_t addr, int size,
         int offset);
 
-// assign address, size and offset (size is the size to copy, offset is the
-// offset where the code will jmp after finishing)
-void rreat_simulate_address(rreat_simulate_t *rr, addr_t addr, int size,
-        int offset);
+// assign start and end address, `wait' will run until `end' is hit.
+void rreat_simulate_address(rreat_simulate_t *rr, addr_t start, addr_t end);
 
 // apply in the process
 void rreat_simulate_apply(rreat_simulate_t *sim);
