@@ -129,6 +129,27 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
 		PAGE_READWRITE);
 	assert(mem);
 	rreat_read(rr, (addr_t) mi.lpBaseOfDll, mem, mi.SizeOfImage);
+	// for now let's hope our binary doesn't destroy the PE headers
+	IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) mem;
+    if(pImageDosHeader->e_lfanew >= 0 && pImageDosHeader->e_lfanew <
+            mi.SizeOfImage) {
+        IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(
+            (unsigned char *) mem + pImageDosHeader->e_lfanew);
+        // needs more checking.
+        IMAGE_SECTION_HEADER *pImageSectionHeader = (IMAGE_SECTION_HEADER *)(
+            (unsigned char *) &pImageNtHeaders->OptionalHeader +
+            pImageNtHeaders->FileHeader.SizeOfOptionalHeader);
+        for (int i = 0; i < pImageNtHeaders->FileHeader.NumberOfSections;
+                i++, pImageSectionHeader++) {
+            // IDA will think the binary is still in raw-offset mode
+            // so we have to set the raw offset & raw size to the virtual
+            // address equivalents
+            pImageSectionHeader->PointerToRawData =
+                pImageSectionHeader->VirtualAddress;
+            pImageSectionHeader->SizeOfRawData =
+                pImageSectionHeader->Misc.VirtualSize;
+        }
+    }
 	FILE *fp = fopen(filename, "wb");
 	assert(fp);
 	fwrite(mem, 1, mi.SizeOfImage, fp);
