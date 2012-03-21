@@ -245,8 +245,21 @@ void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id)
 // free simulate api
 void rreat_simulate_free(rreat_simulate_t *sim)
 {
-	// free the rest
 	rreat_free(sim->_rr, sim->_mem);
 	free(sim->_backup);
 	free(sim);
 }
+
+// single-threaded blocking `simulate' event.
+void rreat_simulate_single(rreat_t *rr, addr_t start, addr_t end,
+        int milliseconds, int thread_id)
+{
+    rreat_simulate_t *sim = rreat_simulate_init(rr);
+    rreat_simulate_address(sim, start, end);
+    rreat_simulate_apply(sim);
+    rreat_thread_resume(rr, thread_id);
+    assert(rreat_simulate_wait(sim, thread_id, milliseconds) == RREAT_SUCCESS);
+    rreat_simulate_restore(sim, thread_id);
+    rreat_simulate_free(sim);
+}
+

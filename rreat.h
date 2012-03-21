@@ -105,4 +105,8 @@ void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id);
 // free simulate api object
 void rreat_simulate_free(rreat_simulate_t *sim);
 
+// single-threaded blocking `simulate' event.
+void rreat_simulate_single(rreat_t *rr, addr_t start, addr_t end,
+        int milliseconds, int thread_id);
+
 #endif
