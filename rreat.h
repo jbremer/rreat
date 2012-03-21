@@ -67,11 +67,21 @@ rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle);
 // resume a thread
 void rreat_thread_resume(rreat_t *rr, int thread_id);
 
+// get a thread object by its id
+rreat_thread_t *rreat_thread_by_id(rreat_t *rr, int thread_id);
+
 // dump a series of pages
 void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename);
 
 // attach JIT Debugger to Process
 void rreat_jitdbg_attach(rreat_t *rr);
+
+// create a dummy thread
+int rreat_thread_dummy(rreat_t *rr);
+
+// places the thread in a while(1) loop
+// with a jmp behind it that will point to the original address
+void rreat_thread_while1(rreat_t *rr, int thread_id);
 
 //
 // RREAT Simulate API
@@ -79,8 +89,6 @@ void rreat_jitdbg_attach(rreat_t *rr);
 
 // init new object
 rreat_simulate_t *rreat_simulate_init(rreat_t *rr);
-void rreat_simulate_address(rreat_simulate_t *rr, addr_t addr, int size,
-        int offset);
 
 // assign start and end address, `wait' will run until `end' is hit.
 void rreat_simulate_address(rreat_simulate_t *rr, addr_t start, addr_t end);
@@ -89,11 +97,10 @@ void rreat_simulate_address(rreat_simulate_t *rr, addr_t start, addr_t end);
 void rreat_simulate_apply(rreat_simulate_t *sim);
 
 // wait for a certain thread to finish this `simulation'
-int rreat_simulate_wait(rreat_simulate_t *sim, rreat_thread_t *t,
-        int milliseconds);
+int rreat_simulate_wait(rreat_simulate_t *sim, int thread_id, int milliseconds);
 
 // restore the thread to the real address
-void rreat_simulate_restore(rreat_simulate_t *sim, rreat_thread_t *t);
+void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id);
 
 // free simulate api object
 void rreat_simulate_free(rreat_simulate_t *sim);
