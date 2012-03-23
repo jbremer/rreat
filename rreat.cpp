@@ -8,7 +8,9 @@
 
 #define EXITERR(msg, ...) _rreat_exit_error(__FUNCTION__, __LINE__, \
         msg, ##__VA_ARGS__)
- 
+
+HMODULE hKernel32 = GetModuleHandle("kernel32.dll");
+
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
 static unsigned long roundup2(unsigned long v) {
@@ -314,3 +316,152 @@ void rreat_simulate_single(rreat_t *rr, addr_t start, addr_t end,
     rreat_simulate_free(sim);
 }
 
+//
+// RREAT Debug Register API
+//
+
+static void _set_bits(unsigned long *value, int offset, int bits, int newval)
+{
+    unsigned long mask = (1 << bits) - 1;
+    *value = (*value & ~(mask << offset)) | (newval << offset);
+}
+
+rreat_hwbp_t *rreat_debugreg_trap(rreat_t *rr, int thread_id, int hwbp_index,
+        addr_t addr, int flags, int size)
+{
+    static const unsigned char table_flags[5] = {
+        /* 0 */ -1, // invalid
+        /* 1 */ 3,  // read
+        /* 2 */ 1,  // write
+        /* 3 */ 3,  // read or write
+        /* 4 */ 0,  // exec
+    };
+    static const unsigned char table_size[9] = {
+        /* 0 */ -1, // invalid
+        /* 1 */ 0,  // 1 byte
+        /* 2 */ 1,  // 2 bytes
+        /* 3 */ -1, // invalid
+        /* 4 */ 3,  // 4 bytes
+        /* 5 */ -1, // invalid
+        /* 6 */ -1, // invalid
+        /* 7 */ -1, // invalid
+        /* 8 */ 2,  // 8 bytes
+    };
+    assert(hwbp_index >= 0 && hwbp_index < 4);
+    assert(flags > 0 && flags < sizeofarray(table_flags));
+    assert(size > 0 && size < sizeofarray(table_size) &&
+            table_size[size] != -1);
+
+    rreat_hwbp_t *hwbp = (rreat_hwbp_t *) calloc(1, sizeof(rreat_hwbp_t));
+
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_DEBUG_REGISTERS);
+    // enable this Debug Register in bits 0..7 
+    _set_bits(&ctx.Dr7, hwbp_index * 2, 2, 1);
+    // set the `type' in bits 16..23
+    _set_bits(&ctx.Dr7, 16 + hwbp_index * 2, 2, table_flags[flags]);
+    // set the `size' in bits 24..31
+    _set_bits(&ctx.Dr7, 24 + hwbp_index * 2, 2, table_size[size]);
+    // set the trap address
+    ((addr_t *) &ctx.Dr0)[hwbp_index] = addr;
+    rreat_context_set(rr, thread_id, &ctx);
+
+    hwbp->addr = addr;
+    hwbp->flags = flags;
+    hwbp->size = size;
+    return hwbp;
+}
+
+void rreat_debugreg_enable(rreat_t *rr, int thread_id, int hwbp_index)
+{
+    assert(hwbp_index >= 0 && hwbp_index < 4);
+
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_DEBUG_REGISTERS);
+    // set the field in the 0..7 bits
+    _set_bits(&ctx.Dr7, hwbp_index * 2, 2, 1);
+    rreat_context_set(rr, thread_id, &ctx);
+}
+
+void rreat_debugreg_disable(rreat_t *rr, int thread_id, int hwbp_index)
+{
+    assert(hwbp_index >= 0 && hwbp_index < 4);
+
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_DEBUG_REGISTERS);
+    // clear the field in the 0..7 bits
+    _set_bits(&ctx.Dr7, hwbp_index * 2, 2, 0);
+    rreat_context_set(rr, thread_id, &ctx);
+}
+
+//
+// RREAT Vectored Exception Handler API
+//
+
+rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler)
+{
+    unsigned char install[] = {
+        0xb8, 0x00, 0x00, 0x00, 0x00, // AddVectoredExceptionHandler() address
+        0x68, 0x00, 0x00, 0x00, 0x00, // handler address
+        0x6a, first_handler != 0,     // `first handler' ?
+        0xff, 0xd0,                   // call AddVectoredExceptionHandler()
+        0xa3, 0x00, 0x00, 0x00, 0x00, // store the exception handler handle
+        0xc3,
+    };
+
+    unsigned char remove[] = {
+        0xb8, 0x00, 0x00, 0x00, 0x00, // RemoveVectoredExceptionHandler() addr
+        0x68, 0x00, 0x00, 0x00, 0x00, // handle to exception handler
+        0xff, 0xd0,                   // call RemoveVectoredExceptionHandler()
+        0xc3,
+    };
+
+    rreat_veh_t *veh = (rreat_veh_t *) calloc(1, sizeof(rreat_veh_t));
+
+    addr_t mem = rreat_alloc(rr, sizeof(install) + sizeof(remove), RREAT_RWX);
+
+    // store address of AddVectoredExceptionHandler
+    *(addr_t *) &install[1] = (addr_t) GetProcAddress(hKernel32,
+            "AddVectoredExceptionHandler");
+
+    // store address of the exception handler
+    *(addr_t *) &install[6] = addr;
+
+    // store the address of RemoveVectoredExceptionHandler
+    *(addr_t *) &remove[1] = (addr_t) GetProcAddress(hKernel32,
+            "RemoveVectoredExceptionHandler");
+
+    // store the address where to write the handle to the exception handler
+    // this can be used later to uninstall the exception handler
+    *(addr_t *) &install[15] = mem + sizeof(install) + 6;
+
+    veh->mem = mem;
+    veh->remove_handler = (LPTHREAD_START_ROUTINE)(mem + sizeof(install));
+
+    // write the two shellcodes
+    rreat_write(rr, mem, install, sizeof(install));
+    rreat_write(rr, mem + sizeof(install), remove, sizeof(remove));
+
+    // now install the handler
+    HANDLE thread = CreateRemoteThread(rr->handle, NULL, 0,
+                (LPTHREAD_START_ROUTINE) mem, NULL, 0, NULL);
+    assert(thread != INVALID_HANDLE_VALUE);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    return veh;
+}
+
+void rreat_veh_uninstall(rreat_t *rr, rreat_veh_t *veh)
+{
+    // call the remove handler
+    HANDLE thread = CreateRemoteThread(rr->handle, NULL, 0,
+            veh->remove_handler, NULL, 0, NULL);
+    assert(thread != INVALID_HANDLE_VALUE);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    // free memory
+    rreat_free(rr, veh->mem);
+    free(veh);
+}

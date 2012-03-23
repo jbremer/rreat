@@ -29,6 +29,17 @@ typedef struct _rreat_t {
 	rreat_thread_t *threads;
 } rreat_t;
 
+typedef struct _rreat_veh_t {
+    addr_t mem;
+    LPTHREAD_START_ROUTINE remove_handler;
+} rreat_veh_t;
+
+typedef struct _rreat_hwbp_t {
+    addr_t addr;
+    int flags;
+    int size;
+} rreat_hwbp_t;
+
 #define RREAT_SUCCESS 0
 #define RREAT_WAIT    1
 
@@ -112,5 +123,20 @@ void rreat_simulate_free(rreat_simulate_t *sim);
 // single-threaded blocking `simulate' event.
 void rreat_simulate_single(rreat_t *rr, addr_t start, addr_t end,
         int milliseconds, int thread_id);
+
+//
+// RREAT Debug Register API
+//
+
+rreat_hwbp_t *rreat_debugreg_trap(rreat_t *rr, int thread_id, int hwbp_index,
+        addr_t addr, int flags, int size);
+void rreat_debugreg_disable(rreat_t *rr, int thread_id, int hwbp_index);
+
+//
+// RREAT Vectored Exception Handler API
+//
+
+rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler);
+void rreat_veh_uninstall(rreat_t *rr, rreat_veh_t *veh);
 
 #endif
