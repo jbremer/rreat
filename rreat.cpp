@@ -236,7 +236,7 @@ int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
 // init new object
 rreat_simulate_t *rreat_simulate_init(rreat_t *rr)
 {
-    rreat_simulate_t *ret = (rreat_simulate_t *) \
+    rreat_simulate_t *ret = (rreat_simulate_t *)
         calloc(1, sizeof(rreat_simulate_t));
     assert(ret);
     ret->_rr = rr;
@@ -255,13 +255,14 @@ void rreat_simulate_address(rreat_simulate_t *rr, addr_t start, addr_t end)
 void rreat_simulate_apply(rreat_simulate_t *sim)
 {
     int size = sim->end - sim->start;
-    sim->_mem = rreat_alloc(sim->_rr, size + 2, RREAT_RWX);
+    sim->_mem = rreat_alloc(sim->_rr, size + 4, RREAT_RWX);
     sim->_backup = malloc(size);
     // read original code
     rreat_read(sim->_rr, sim->start, sim->_backup, size);
-    // write new code with while(1) loop
-    rreat_write(sim->_rr, sim->_mem, sim->_backup, size);
-    rreat_write(sim->_rr, sim->_mem + size, "\xeb\xfe", 2);
+    // write new code with a while(1) loop before and after the code
+    rreat_write(sim->_rr, sim->_mem, "\xeb\xfe", 2);
+    rreat_write(sim->_rr, sim->_mem + 2, sim->_backup, size);
+    rreat_write(sim->_rr, sim->_mem + size + 2, "\xeb\xfe", 2);
     // write detour jmp
     unsigned char jmp[5] = {0xe9};
     *(addr_t *) &jmp[1] = sim->_mem - sim->start - 5;
@@ -269,8 +270,26 @@ void rreat_simulate_apply(rreat_simulate_t *sim)
 }
 
 // wait for a certain thread to finish this `simulation'
-int rreat_simulate_wait(rreat_simulate_t *sim, int thread_id, int milliseconds)
+int rreat_simulate_run(rreat_simulate_t *sim, int thread_id, int milliseconds)
 {
+    unsigned long start = GetTickCount();
+
+    // wait until we actually reach our special code
+    assert(rreat_thread_wait_for_address(sim->_rr, thread_id,
+                sim->_mem, milliseconds) == RREAT_SUCCESS);
+
+    // move past the while(1) instruction
+    CONTEXT ctx;
+    rreat_context_get(sim->_rr, thread_id, &ctx, CONTEXT_FULL);
+    ctx.Eip += 2;
+    rreat_context_set(sim->_rr, thread_id, &ctx);
+
+    // restore the original code..
+    rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
+
+    // now wait till it finishes (don't include the time we have already been
+    // processing, assume we have time left)
+    milliseconds = start + milliseconds - GetTickCount();
     return rreat_thread_wait_for_address(sim->_rr, thread_id,
             sim->_mem + sim->end - sim->start, milliseconds);
 }
@@ -283,9 +302,6 @@ void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id)
     rreat_context_get(sim->_rr, thread_id, &ctx, CONTEXT_FULL);
     ctx.Eip = sim->end;
     rreat_context_set(sim->_rr, thread_id, &ctx);
-    
-    // restore the original code
-    rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
 }
 
 // free simulate api
@@ -304,7 +320,7 @@ void rreat_simulate_single(rreat_t *rr, addr_t start, addr_t end,
     rreat_simulate_address(sim, start, end);
     rreat_simulate_apply(sim);
     rreat_thread_resume(rr, thread_id);
-    assert(rreat_simulate_wait(sim, thread_id, milliseconds) == RREAT_SUCCESS);
+    assert(rreat_simulate_run(sim, thread_id, milliseconds) == RREAT_SUCCESS);
     rreat_simulate_restore(sim, thread_id);
     rreat_simulate_free(sim);
 }
