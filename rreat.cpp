@@ -100,15 +100,13 @@ rreat_t *rreat_process_init(const char *filename)
     rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
     assert(p);
     p->process_id = pi.dwProcessId;
-    printf("process: %x %d\n", pi.dwProcessId, pi.dwProcessId);
-    printf("thread: %x %d\n", pi.dwThreadId, pi.dwThreadId);
     p->handle = pi.hProcess;
     rreat_thread_init(p, pi.hThread);
     return p;
 }
 
-// create a new thread object
-rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle)
+// create a new thread object (returns thread id)
+int rreat_thread_init(rreat_t *rr, HANDLE handle)
 {
     int newsize = roundup2(rr->thread_count + 1);
     if(roundup2(rr->thread_count) != newsize) {
@@ -118,7 +116,7 @@ rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle)
     rreat_thread_t *t = &rr->threads[rr->thread_count];
     t->thread_id = rr->thread_count++;
     t->handle = handle;
-    return t;
+    return rr->thread_count - 1;
 }
 
 // resume a thread
@@ -126,7 +124,14 @@ void rreat_thread_resume(rreat_t *rr, int thread_id)
 {
     rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
     assert(ResumeThread(t->handle) != -1);
-}       
+}   
+
+// suspend a thread
+void rreat_thread_suspend(rreat_t *rr, int thread_id)
+{
+    rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
+    assert(SuspendThread(t->handle) != -1);
+}
 
 // get a thread object by its id
 rreat_thread_t *rreat_thread_by_id(rreat_t *rr, int thread_id)
@@ -138,7 +143,7 @@ rreat_thread_t *rreat_thread_by_id(rreat_t *rr, int thread_id)
 // dump a series of pages
 void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
 {
-    MODULEINFO mi = {};
+    MODULEINFO mi;
     assert(GetModuleInformation(rr->handle, (HMODULE) base_addr, &mi,
         sizeof(mi)));
     void *mem = VirtualAlloc(NULL, mi.SizeOfImage, MEM_COMMIT | MEM_RESERVE,
@@ -189,6 +194,7 @@ int rreat_thread_dummy(rreat_t *rr)
     addr_t addr = rreat_alloc(rr, 2, RREAT_RWX);
     HANDLE handle = CreateRemoteThread(rr->handle, NULL, 0,
         (LPTHREAD_START_ROUTINE) addr, NULL, 0, NULL);
+    assert(handle != INVALID_HANDLE_VALUE);
     rreat_thread_init(rr, handle);
     return rr->thread_count - 1;
 }
@@ -197,14 +203,13 @@ int rreat_thread_dummy(rreat_t *rr)
 // with a jmp behind it that will point to the original address
 void rreat_thread_while1(rreat_t *rr, int thread_id)
 {
-    rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
-    CONTEXT ctx = {CONTEXT_FULL};
-    assert(GetThreadContext(t->handle, &ctx));
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_FULL);
     unsigned char code[7] = {0xeb, 0xfe, 0xe9};
     addr_t addr = rreat_alloc(rr, 7, RREAT_RWX);
     *(addr_t *) &code[3] = ctx.Eip - addr - 5 - 2;
     ctx.Eip = addr;
-    assert(SetThreadContext(t->handle, &ctx));
+    rreat_context_set(rr, thread_id, &ctx);
     rreat_write(rr, addr, code, sizeof(code));
     rreat_thread_resume(rr, thread_id);
 }
@@ -214,12 +219,11 @@ int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
         int milliseconds)
 {
     CONTEXT ctx; unsigned long start = GetTickCount();
-    rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
     while (start + milliseconds > GetTickCount()) {
-        assert(SuspendThread(t->handle) != -1);
+        rreat_thread_suspend(rr, thread_id);
         rreat_context_get(rr, thread_id, &ctx, CONTEXT_FULL);
         if(ctx.Eip == addr) return RREAT_SUCCESS;
-        assert(ResumeThread(t->handle) != -1);
+        rreat_thread_resume(rr, thread_id);
         Sleep(1);
     }
     return RREAT_WAIT;
@@ -267,30 +271,19 @@ void rreat_simulate_apply(rreat_simulate_t *sim)
 // wait for a certain thread to finish this `simulation'
 int rreat_simulate_wait(rreat_simulate_t *sim, int thread_id, int milliseconds)
 {
-    unsigned long start = GetTickCount();
-    rreat_thread_t *t = rreat_thread_by_id(sim->_rr, thread_id);
-    while (start + milliseconds > GetTickCount()) {
-        assert(SuspendThread(t->handle) != -1);
-        CONTEXT ctx = {CONTEXT_FULL};
-        assert(GetThreadContext(t->handle, &ctx));
-        if(ctx.Eip == sim->_mem + sim->end - sim->start) {
-            return RREAT_SUCCESS;
-        }
-        assert(ResumeThread(t->handle) != -1);
-        Sleep(1);
-    }
-    return RREAT_WAIT;
+    return rreat_thread_wait_for_address(sim->_rr, thread_id,
+            sim->_mem + sim->end - sim->start, milliseconds);
 }
 
 // restore the thread to the real address
 void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id)
 {
-    rreat_thread_t *t = rreat_thread_by_id(sim->_rr, thread_id);
     // restore eip
-    CONTEXT ctx = {CONTEXT_FULL};
-    assert(GetThreadContext(t->handle, &ctx));
+    CONTEXT ctx;
+    rreat_context_get(sim->_rr, thread_id, &ctx, CONTEXT_FULL);
     ctx.Eip = sim->end;
-    assert(SetThreadContext(t->handle, &ctx));
+    rreat_context_set(sim->_rr, thread_id, &ctx);
+    
     // restore the original code
     rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
 }
@@ -465,3 +458,4 @@ void rreat_veh_uninstall(rreat_t *rr, rreat_veh_t *veh)
     rreat_free(rr, veh->mem);
     free(veh);
 }
+

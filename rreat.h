@@ -69,14 +69,24 @@ void rreat_read(rreat_t *rr, addr_t addr, void *dest, unsigned long size);
 // RREAT Debugger API
 //
 
+// get the context of a thread
+void rreat_context_get(rreat_t *rr, int thread_id, CONTEXT *ctx,
+        unsigned long flags);
+
+// set the context of a thread
+void rreat_context_set(rreat_t *rr, int thread_id, CONTEXT *ctx);
+
 // create a new process object
 rreat_t *rreat_process_init(const char *filename);
 
-// create a new thread object
-rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle);
-
+// create a new thread object (returns thread id)
+int rreat_thread_init(rreat_t *rr, HANDLE handle);
+                  
 // resume a thread
 void rreat_thread_resume(rreat_t *rr, int thread_id);
+
+// suspend a thread
+void rreat_thread_suspend(rreat_t *rr, int thread_id);
 
 // get a thread object by its id
 rreat_thread_t *rreat_thread_by_id(rreat_t *rr, int thread_id);
