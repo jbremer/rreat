@@ -75,6 +75,20 @@ void rreat_read(rreat_t *rr, addr_t addr, void *dest, unsigned long size)
 // RREAT Debugger API
 //
 
+void rreat_context_get(rreat_t *rr, int thread_id, CONTEXT *ctx,
+        unsigned long flags)
+{
+    rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
+    ctx->ContextFlags = flags;
+    assert(GetThreadContext(t->handle, ctx));
+}
+
+void rreat_context_set(rreat_t *rr, int thread_id, CONTEXT *ctx)
+{
+    rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
+    assert(SetThreadContext(t->handle, ctx));
+}
+
 // create a new process object
 rreat_t *rreat_process_init(const char *filename)
 {
@@ -191,6 +205,22 @@ void rreat_thread_while1(rreat_t *rr, int thread_id)
 	assert(SetThreadContext(t->handle, &ctx));
 	rreat_write(rr, addr, code, sizeof(code));
 	rreat_thread_resume(rr, thread_id);
+}
+
+// waits until the thread hits the given address
+int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
+        int milliseconds)
+{
+    CONTEXT ctx; unsigned long start = GetTickCount();
+    rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
+    while (start + milliseconds > GetTickCount()) {
+        assert(SuspendThread(t->handle) != -1);
+        rreat_context_get(rr, thread_id, &ctx, CONTEXT_FULL);
+        if(ctx.Eip == addr) return RREAT_SUCCESS;
+        assert(ResumeThread(t->handle) != -1);
+        Sleep(1);
+    }
+    return RREAT_WAIT;
 }
 
 //

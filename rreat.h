@@ -83,6 +83,10 @@ int rreat_thread_dummy(rreat_t *rr);
 // with a jmp behind it that will point to the original address
 void rreat_thread_while1(rreat_t *rr, int thread_id);
 
+// waits until the thread hits the given address
+int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
+        int milliseconds);
+
 //
 // RREAT Simulate API
 //
