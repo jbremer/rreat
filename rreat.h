@@ -8,13 +8,13 @@ typedef unsigned long addr_t;
 struct _rreat;
 
 typedef struct _rreat_simulate_t {
-	addr_t start;
-	addr_t end;
+    addr_t start;
+    addr_t end;
 
-	// internal
-	struct _rreat_t *_rr;
-	addr_t _mem;
-	void *_backup;
+    // internal
+    struct _rreat_t *_rr;
+    addr_t _mem;
+    void *_backup;
 } rreat_simulate_t;
 
 typedef struct _rreat_thread_t {
@@ -23,10 +23,10 @@ typedef struct _rreat_thread_t {
 } rreat_thread_t;
 
 typedef struct _rreat_t {
-	int process_id;
+    int process_id;
     HANDLE handle;
-	int thread_count;
-	rreat_thread_t *threads;
+    int thread_count;
+    rreat_thread_t *threads;
 } rreat_t;
 
 typedef struct _rreat_veh_t {

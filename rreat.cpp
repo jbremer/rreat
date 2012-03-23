@@ -14,8 +14,8 @@ HMODULE hKernel32 = GetModuleHandle("kernel32.dll");
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
 static unsigned long roundup2(unsigned long v) {
-	v--, v |= v >> 1, v |= v >> 2, v |= v >> 4;
-	return v |= v >> 8, v |= v >> 16, ++v;
+    v--, v |= v >> 1, v |= v >> 2, v |= v >> 4;
+    return v |= v >> 8, v |= v >> 16, ++v;
 }
 
 static void _rreat_exit_error(const char *func, int line, const char *msg, ...)
@@ -94,38 +94,38 @@ void rreat_context_set(rreat_t *rr, int thread_id, CONTEXT *ctx)
 // create a new process object
 rreat_t *rreat_process_init(const char *filename)
 {
-	STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
-	assert(CreateProcess(filename, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED,
-		NULL, NULL, &si, &pi));
-	rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
-	assert(p);
-	p->process_id = pi.dwProcessId;
-	printf("process: %x %d\n", pi.dwProcessId, pi.dwProcessId);
-	printf("thread: %x %d\n", pi.dwThreadId, pi.dwThreadId);
-	p->handle = pi.hProcess;
-	rreat_thread_init(p, pi.hThread);
-	return p;
+    STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
+    assert(CreateProcess(filename, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED,
+        NULL, NULL, &si, &pi));
+    rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
+    assert(p);
+    p->process_id = pi.dwProcessId;
+    printf("process: %x %d\n", pi.dwProcessId, pi.dwProcessId);
+    printf("thread: %x %d\n", pi.dwThreadId, pi.dwThreadId);
+    p->handle = pi.hProcess;
+    rreat_thread_init(p, pi.hThread);
+    return p;
 }
 
 // create a new thread object
 rreat_thread_t *rreat_thread_init(rreat_t *rr, HANDLE handle)
 {
-	int newsize = roundup2(rr->thread_count + 1);
-	if(roundup2(rr->thread_count) != newsize) {
-		rr->threads = (rreat_thread_t *) realloc(rr->threads, newsize);
-		assert(rr->threads);
-	}
-	rreat_thread_t *t = &rr->threads[rr->thread_count];
-	t->thread_id = rr->thread_count++;
-	t->handle = handle;
-	return t;
+    int newsize = roundup2(rr->thread_count + 1);
+    if(roundup2(rr->thread_count) != newsize) {
+        rr->threads = (rreat_thread_t *) realloc(rr->threads, newsize);
+        assert(rr->threads);
+    }
+    rreat_thread_t *t = &rr->threads[rr->thread_count];
+    t->thread_id = rr->thread_count++;
+    t->handle = handle;
+    return t;
 }
 
 // resume a thread
 void rreat_thread_resume(rreat_t *rr, int thread_id)
 {
     rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
-	assert(ResumeThread(t->handle) != -1);
+    assert(ResumeThread(t->handle) != -1);
 }       
 
 // get a thread object by its id
@@ -138,15 +138,15 @@ rreat_thread_t *rreat_thread_by_id(rreat_t *rr, int thread_id)
 // dump a series of pages
 void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
 {
-	MODULEINFO mi = {};
-	assert(GetModuleInformation(rr->handle, (HMODULE) base_addr, &mi,
-	    sizeof(mi)));
-	void *mem = VirtualAlloc(NULL, mi.SizeOfImage, MEM_COMMIT | MEM_RESERVE,
-		PAGE_READWRITE);
-	assert(mem);
-	rreat_read(rr, (addr_t) mi.lpBaseOfDll, mem, mi.SizeOfImage);
-	// for now let's hope our binary doesn't destroy the PE headers
-	IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) mem;
+    MODULEINFO mi = {};
+    assert(GetModuleInformation(rr->handle, (HMODULE) base_addr, &mi,
+        sizeof(mi)));
+    void *mem = VirtualAlloc(NULL, mi.SizeOfImage, MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE);
+    assert(mem);
+    rreat_read(rr, (addr_t) mi.lpBaseOfDll, mem, mi.SizeOfImage);
+    // for now let's hope our binary doesn't destroy the PE headers
+    IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) mem;
     if(pImageDosHeader->e_lfanew >= 0 && pImageDosHeader->e_lfanew <
             mi.SizeOfImage) {
         IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(
@@ -166,31 +166,31 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
                 pImageSectionHeader->Misc.VirtualSize;
         }
     }
-	FILE *fp = fopen(filename, "wb");
-	assert(fp);
-	fwrite(mem, 1, mi.SizeOfImage, fp);
-	fclose(fp);
-	assert(VirtualFree(mem, 0, MEM_RELEASE));
+    FILE *fp = fopen(filename, "wb");
+    assert(fp);
+    fwrite(mem, 1, mi.SizeOfImage, fp);
+    fclose(fp);
+    assert(VirtualFree(mem, 0, MEM_RELEASE));
 }
 
 // attach JIT Debugger to Process
 void rreat_jitdbg_attach(rreat_t *rr)
 {
-	char path[MAX_PATH];
-	_snprintf(path, sizeofarray(path), RREAT_JITDEBUGGER, rr->process_id);
-	STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
-	CreateProcess(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-	CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    char path[MAX_PATH];
+    _snprintf(path, sizeofarray(path), RREAT_JITDEBUGGER, rr->process_id);
+    STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
+    CreateProcess(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
 }
 
 // create a dummy thread
 int rreat_thread_dummy(rreat_t *rr)
 {
-	addr_t addr = rreat_alloc(rr, 2, RREAT_RWX);
-	HANDLE handle = CreateRemoteThread(rr->handle, NULL, 0,
-	    (LPTHREAD_START_ROUTINE) addr, NULL, 0, NULL);
-	rreat_thread_init(rr, handle);
-	return rr->thread_count - 1;
+    addr_t addr = rreat_alloc(rr, 2, RREAT_RWX);
+    HANDLE handle = CreateRemoteThread(rr->handle, NULL, 0,
+        (LPTHREAD_START_ROUTINE) addr, NULL, 0, NULL);
+    rreat_thread_init(rr, handle);
+    return rr->thread_count - 1;
 }
 
 // places the thread in a while(1) loop
@@ -198,15 +198,15 @@ int rreat_thread_dummy(rreat_t *rr)
 void rreat_thread_while1(rreat_t *rr, int thread_id)
 {
     rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
-	CONTEXT ctx = {CONTEXT_FULL};
-	assert(GetThreadContext(t->handle, &ctx));
-	unsigned char code[7] = {0xeb, 0xfe, 0xe9};
-	addr_t addr = rreat_alloc(rr, 7, RREAT_RWX);
-	*(addr_t *) &code[3] = ctx.Eip - addr - 5 - 2;
-	ctx.Eip = addr;
-	assert(SetThreadContext(t->handle, &ctx));
-	rreat_write(rr, addr, code, sizeof(code));
-	rreat_thread_resume(rr, thread_id);
+    CONTEXT ctx = {CONTEXT_FULL};
+    assert(GetThreadContext(t->handle, &ctx));
+    unsigned char code[7] = {0xeb, 0xfe, 0xe9};
+    addr_t addr = rreat_alloc(rr, 7, RREAT_RWX);
+    *(addr_t *) &code[3] = ctx.Eip - addr - 5 - 2;
+    ctx.Eip = addr;
+    assert(SetThreadContext(t->handle, &ctx));
+    rreat_write(rr, addr, code, sizeof(code));
+    rreat_thread_resume(rr, thread_id);
 }
 
 // waits until the thread hits the given address
@@ -232,75 +232,75 @@ int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
 // init new object
 rreat_simulate_t *rreat_simulate_init(rreat_t *rr)
 {
-	rreat_simulate_t *ret = (rreat_simulate_t *) \
-		calloc(1, sizeof(rreat_simulate_t));
-	assert(ret);
-	ret->_rr = rr;
-	return ret;
+    rreat_simulate_t *ret = (rreat_simulate_t *) \
+        calloc(1, sizeof(rreat_simulate_t));
+    assert(ret);
+    ret->_rr = rr;
+    return ret;
 }
 
 // assign start and end address, `wait' will run until `end' is hit.
 void rreat_simulate_address(rreat_simulate_t *rr, addr_t start, addr_t end)
 {
-	assert(end - start >= 5);
-	rr->start = start;
-	rr->end = end;
+    assert(end - start >= 5);
+    rr->start = start;
+    rr->end = end;
 }
 
 // apply in the process
 void rreat_simulate_apply(rreat_simulate_t *sim)
 {
-	int size = sim->end - sim->start;
-	sim->_mem = rreat_alloc(sim->_rr, size + 2, RREAT_RWX);
-	sim->_backup = malloc(size);
-	// read original code
-	rreat_read(sim->_rr, sim->start, sim->_backup, size);
-	// write new code with while(1) loop
-	rreat_write(sim->_rr, sim->_mem, sim->_backup, size);
-	rreat_write(sim->_rr, sim->_mem + size, "\xeb\xfe", 2);
-	// write detour jmp
-	unsigned char jmp[5] = {0xe9};
-	*(addr_t *) &jmp[1] = sim->_mem - sim->start - 5;
-	rreat_write(sim->_rr, sim->start, jmp, sizeof(jmp));
+    int size = sim->end - sim->start;
+    sim->_mem = rreat_alloc(sim->_rr, size + 2, RREAT_RWX);
+    sim->_backup = malloc(size);
+    // read original code
+    rreat_read(sim->_rr, sim->start, sim->_backup, size);
+    // write new code with while(1) loop
+    rreat_write(sim->_rr, sim->_mem, sim->_backup, size);
+    rreat_write(sim->_rr, sim->_mem + size, "\xeb\xfe", 2);
+    // write detour jmp
+    unsigned char jmp[5] = {0xe9};
+    *(addr_t *) &jmp[1] = sim->_mem - sim->start - 5;
+    rreat_write(sim->_rr, sim->start, jmp, sizeof(jmp));
 }
 
 // wait for a certain thread to finish this `simulation'
 int rreat_simulate_wait(rreat_simulate_t *sim, int thread_id, int milliseconds)
 {
-	unsigned long start = GetTickCount();
-	rreat_thread_t *t = rreat_thread_by_id(sim->_rr, thread_id);
-	while (start + milliseconds > GetTickCount()) {
-		assert(SuspendThread(t->handle) != -1);
-		CONTEXT ctx = {CONTEXT_FULL};
-		assert(GetThreadContext(t->handle, &ctx));
-		if(ctx.Eip == sim->_mem + sim->end - sim->start) {
-			return RREAT_SUCCESS;
-		}
-		assert(ResumeThread(t->handle) != -1);
-		Sleep(1);
-	}
-	return RREAT_WAIT;
+    unsigned long start = GetTickCount();
+    rreat_thread_t *t = rreat_thread_by_id(sim->_rr, thread_id);
+    while (start + milliseconds > GetTickCount()) {
+        assert(SuspendThread(t->handle) != -1);
+        CONTEXT ctx = {CONTEXT_FULL};
+        assert(GetThreadContext(t->handle, &ctx));
+        if(ctx.Eip == sim->_mem + sim->end - sim->start) {
+            return RREAT_SUCCESS;
+        }
+        assert(ResumeThread(t->handle) != -1);
+        Sleep(1);
+    }
+    return RREAT_WAIT;
 }
 
 // restore the thread to the real address
 void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id)
 {
     rreat_thread_t *t = rreat_thread_by_id(sim->_rr, thread_id);
-	// restore eip
-	CONTEXT ctx = {CONTEXT_FULL};
-	assert(GetThreadContext(t->handle, &ctx));
-	ctx.Eip = sim->end;
-	assert(SetThreadContext(t->handle, &ctx));
-	// restore the original code
-	rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
+    // restore eip
+    CONTEXT ctx = {CONTEXT_FULL};
+    assert(GetThreadContext(t->handle, &ctx));
+    ctx.Eip = sim->end;
+    assert(SetThreadContext(t->handle, &ctx));
+    // restore the original code
+    rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
 }
 
 // free simulate api
 void rreat_simulate_free(rreat_simulate_t *sim)
 {
-	rreat_free(sim->_rr, sim->_mem);
-	free(sim->_backup);
-	free(sim);
+    rreat_free(sim->_rr, sim->_mem);
+    free(sim->_backup);
+    free(sim);
 }
 
 // single-threaded blocking `simulate' event.
