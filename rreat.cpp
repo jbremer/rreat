@@ -91,6 +91,29 @@ void rreat_context_set(rreat_t *rr, int thread_id, CONTEXT *ctx)
     assert(SetThreadContext(t->handle, ctx));
 }
 
+addr_t rreat_ip_get(rreat_t *rr, int thread_id)
+{
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_CONTROL);
+    return ctx.Eip;
+}
+
+void rreat_ip_set(rreat_t *rr, int thread_id, addr_t addr)
+{
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_CONTROL);
+    ctx.Eip = addr;
+    rreat_context_set(rr, thread_id, &ctx);
+}
+
+void rreat_ip_add(rreat_t *rr, int thread_id, int delta)
+{
+    CONTEXT ctx;
+    rreat_context_get(rr, thread_id, &ctx, CONTEXT_CONTROL);
+    ctx.Eip += delta;
+    rreat_context_set(rr, thread_id, &ctx);
+}
+
 // create a new process object
 rreat_t *rreat_process_init(const char *filename)
 {
@@ -218,11 +241,10 @@ void rreat_thread_while1(rreat_t *rr, int thread_id)
 int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
         int milliseconds)
 {
-    CONTEXT ctx; unsigned long start = GetTickCount();
+    unsigned long start = GetTickCount();
     while (start + milliseconds > GetTickCount()) {
         rreat_thread_suspend(rr, thread_id);
-        rreat_context_get(rr, thread_id, &ctx, CONTEXT_FULL);
-        if(ctx.Eip == addr) return RREAT_SUCCESS;
+        if(rreat_ip_get(rr, thread_id) == addr) return RREAT_SUCCESS;
         rreat_thread_resume(rr, thread_id);
         Sleep(1);
     }
@@ -279,10 +301,7 @@ int rreat_simulate_run(rreat_simulate_t *sim, int thread_id, int milliseconds)
                 sim->_mem, milliseconds) == RREAT_SUCCESS);
 
     // move past the while(1) instruction
-    CONTEXT ctx;
-    rreat_context_get(sim->_rr, thread_id, &ctx, CONTEXT_FULL);
-    ctx.Eip += 2;
-    rreat_context_set(sim->_rr, thread_id, &ctx);
+    rreat_ip_add(sim->_rr, thread_id, 2);
 
     // restore the original code..
     rreat_write(sim->_rr, sim->start, sim->_backup, sim->end - sim->start);
@@ -298,10 +317,7 @@ int rreat_simulate_run(rreat_simulate_t *sim, int thread_id, int milliseconds)
 void rreat_simulate_restore(rreat_simulate_t *sim, int thread_id)
 {
     // restore eip
-    CONTEXT ctx;
-    rreat_context_get(sim->_rr, thread_id, &ctx, CONTEXT_FULL);
-    ctx.Eip = sim->end;
-    rreat_context_set(sim->_rr, thread_id, &ctx);
+    rreat_ip_set(sim->_rr, thread_id, sim->end);
 }
 
 // free simulate api

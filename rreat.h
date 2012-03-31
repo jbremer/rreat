@@ -76,6 +76,15 @@ void rreat_context_get(rreat_t *rr, int thread_id, CONTEXT *ctx,
 // set the context of a thread
 void rreat_context_set(rreat_t *rr, int thread_id, CONTEXT *ctx);
 
+// get the instruction pointer of a thread
+addr_t rreat_ip_get(rreat_t *rr, int thread_id);
+
+// set the instruction pointer of a thread
+void rreat_ip_set(rreat_t *rr, int thread_id, addr_t addr);
+
+// add delta to the instruction pointer of a thread
+void rreat_ip_add(rreat_t *rr, int thread_id, int delta);
+
 // create a new process object
 rreat_t *rreat_process_init(const char *filename);
 
