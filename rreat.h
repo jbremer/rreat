@@ -53,6 +53,12 @@ typedef struct _rreat_hwbp_t {
 #endif
 
 //
+// RREAT Initialize Function
+//
+
+void rreat_init();
+
+//
 // RREAT Memory API
 //
 
@@ -90,7 +96,7 @@ rreat_t *rreat_process_init(const char *filename);
 
 // create a new thread object (returns thread id)
 int rreat_thread_init(rreat_t *rr, HANDLE handle);
-                  
+
 // resume a thread
 void rreat_thread_resume(rreat_t *rr, int thread_id);
 

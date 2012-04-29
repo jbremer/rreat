@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <windows.h>
 #include <psapi.h>
@@ -9,7 +10,7 @@
 #define EXITERR(msg, ...) _rreat_exit_error(__FUNCTION__, __LINE__, \
         msg, ##__VA_ARGS__)
 
-HMODULE hKernel32 = GetModuleHandle("kernel32.dll");
+static HMODULE g_hKernel32;
 
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
@@ -29,6 +30,12 @@ static void _rreat_exit_error(const char *func, int line, const char *msg, ...)
     ExitProcess(0);
 }
 
+void rreat_init()
+{
+    g_hKernel32 = GetModuleHandle("kernel32.dll");
+    assert(g_hKernel32 != NULL);
+}
+
 //
 // RREAT Memory API
 //
@@ -45,9 +52,9 @@ addr_t rreat_alloc(rreat_t *rr, unsigned long size, unsigned long flags)
         /* 6 */ PAGE_EXECUTE_READWRITE,
         /* 7 */ PAGE_EXECUTE_READWRITE,
     };
-    
+
     assert(flags != 0 && flags < sizeofarray(table));
-    
+
     addr_t ret = (addr_t) VirtualAllocEx(rr->handle, NULL, roundup2(size),
             MEM_COMMIT | MEM_RESERVE, table[flags]);
     assert(ret);
@@ -117,7 +124,7 @@ void rreat_ip_add(rreat_t *rr, int thread_id, int delta)
 // create a new process object
 rreat_t *rreat_process_init(const char *filename)
 {
-    STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
+    STARTUPINFO si = {0}; PROCESS_INFORMATION pi = {0};
     assert(CreateProcess(filename, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED,
         NULL, NULL, &si, &pi));
     rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
@@ -147,7 +154,7 @@ void rreat_thread_resume(rreat_t *rr, int thread_id)
 {
     rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
     assert(ResumeThread(t->handle) != -1);
-}   
+}
 
 // suspend a thread
 void rreat_thread_suspend(rreat_t *rr, int thread_id)
@@ -175,8 +182,8 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
     rreat_read(rr, (addr_t) mi.lpBaseOfDll, mem, mi.SizeOfImage);
     // for now let's hope our binary doesn't destroy the PE headers
     IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) mem;
-    if(pImageDosHeader->e_lfanew >= 0 && pImageDosHeader->e_lfanew <
-            mi.SizeOfImage) {
+    if(pImageDosHeader->e_lfanew >= 0 &&
+			(unsigned long) pImageDosHeader->e_lfanew < mi.SizeOfImage) {
         IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(
             (unsigned char *) mem + pImageDosHeader->e_lfanew);
         // needs more checking.
@@ -206,7 +213,7 @@ void rreat_jitdbg_attach(rreat_t *rr)
 {
     char path[MAX_PATH];
     _snprintf(path, sizeofarray(path), RREAT_JITDEBUGGER, rr->process_id);
-    STARTUPINFO si = {}; PROCESS_INFORMATION pi = {};
+    STARTUPINFO si = {0}; PROCESS_INFORMATION pi = {0};
     CreateProcess(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
 }
@@ -355,33 +362,33 @@ rreat_hwbp_t *rreat_debugreg_trap(rreat_t *rr, int thread_id, int hwbp_index,
         addr_t addr, int flags, int size)
 {
     static const unsigned char table_flags[5] = {
-        /* 0 */ -1, // invalid
+        /* 0 */ 0xff, // invalid
         /* 1 */ 3,  // read
         /* 2 */ 1,  // write
         /* 3 */ 3,  // read or write
         /* 4 */ 0,  // exec
     };
     static const unsigned char table_size[9] = {
-        /* 0 */ -1, // invalid
+        /* 0 */ 0xff, // invalid
         /* 1 */ 0,  // 1 byte
         /* 2 */ 1,  // 2 bytes
-        /* 3 */ -1, // invalid
+        /* 3 */ 0xff, // invalid
         /* 4 */ 3,  // 4 bytes
-        /* 5 */ -1, // invalid
-        /* 6 */ -1, // invalid
-        /* 7 */ -1, // invalid
+        /* 5 */ 0xff, // invalid
+        /* 6 */ 0xff, // invalid
+        /* 7 */ 0xff, // invalid
         /* 8 */ 2,  // 8 bytes
     };
     assert(hwbp_index >= 0 && hwbp_index < 4);
     assert(flags > 0 && flags < sizeofarray(table_flags));
     assert(size > 0 && size < sizeofarray(table_size) &&
-            table_size[size] != -1);
+            table_size[size] != 0xff);
 
     rreat_hwbp_t *hwbp = (rreat_hwbp_t *) calloc(1, sizeof(rreat_hwbp_t));
 
     CONTEXT ctx;
     rreat_context_get(rr, thread_id, &ctx, CONTEXT_DEBUG_REGISTERS);
-    // enable this Debug Register in bits 0..7 
+    // enable this Debug Register in bits 0..7
     _set_bits(&ctx.Dr7, hwbp_index * 2, 2, 1);
     // set the `type' in bits 16..23
     _set_bits(&ctx.Dr7, 16 + hwbp_index * 2, 2, table_flags[flags]);
@@ -446,14 +453,14 @@ rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler)
     addr_t mem = rreat_alloc(rr, sizeof(install) + sizeof(remove), RREAT_RWX);
 
     // store address of AddVectoredExceptionHandler
-    *(addr_t *) &install[1] = (addr_t) GetProcAddress(hKernel32,
+    *(addr_t *) &install[1] = (addr_t) GetProcAddress(g_hKernel32,
             "AddVectoredExceptionHandler");
 
     // store address of the exception handler
     *(addr_t *) &install[6] = addr;
 
     // store the address of RemoveVectoredExceptionHandler
-    *(addr_t *) &remove[1] = (addr_t) GetProcAddress(hKernel32,
+    *(addr_t *) &remove[1] = (addr_t) GetProcAddress(g_hKernel32,
             "RemoveVectoredExceptionHandler");
 
     // store the address where to write the handle to the exception handler

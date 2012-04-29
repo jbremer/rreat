@@ -41,6 +41,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
+      <AdditionalOptions>/TP %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -62,7 +63,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="rreat.cpp" />
+    <ClCompile Include="rreat.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />
