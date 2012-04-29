@@ -183,7 +183,7 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
     // for now let's hope our binary doesn't destroy the PE headers
     IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) mem;
     if(pImageDosHeader->e_lfanew >= 0 &&
-			(unsigned long) pImageDosHeader->e_lfanew < mi.SizeOfImage) {
+            (unsigned long) pImageDosHeader->e_lfanew < mi.SizeOfImage) {
         IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(
             (unsigned char *) mem + pImageDosHeader->e_lfanew);
         // needs more checking.
@@ -496,5 +496,69 @@ void rreat_veh_uninstall(rreat_t *rr, rreat_veh_t *veh)
     // free memory
     rreat_free(rr, veh->mem);
     free(veh);
+}
+
+//
+// RREAT Detour API
+//
+
+typedef void (*_rreat_detour_type_t)(rreat_t *rr, rreat_detour_t *detour,
+    addr_t addr, addr_t payload);
+
+// places a regular "jmp payload" instruction at `addr'.
+static void _rreat_detour_jmp(rreat_t *rr, rreat_detour_t *detour, addr_t addr,
+    addr_t payload)
+{
+    detour->length = 5;
+    detour->addr = addr;
+    rreat_read(rr, detour->addr, detour->backup, detour->length);
+
+    unsigned char bytes[5] = {0xe9};
+    *(addr_t *) &bytes[1] = payload - addr - 5;
+
+    rreat_write(rr, detour->addr, bytes, detour->length);
+}
+
+static void _rreat_detour_fpu(rreat_t *rr, rreat_detour_t *detour, addr_t addr,
+    addr_t payload)
+{
+    detour->_extra_data = rreat_alloc(rr, sizeof(double), RREAT_READ);
+    double payload_addr = (double) payload;
+    rreat_write(rr, detour->_extra_data, &payload_addr, sizeof(payload_addr));
+    unsigned char bytes[] = {
+        0x55,                               // push ebp
+        0xdd, 0x05, 0x00, 0x00, 0x00, 0x00, // fld qword [_extra_data]
+        0xdb, 0x1c, 0xe4,                   // fistp dword [esp]
+        0xc3,                               // retn
+    };
+
+    *(addr_t *) &bytes[3] = detour->_extra_data;
+    rreat_write(rr, addr, &bytes, sizeof(bytes));
+}
+
+rreat_detour_t *rreat_detour_address(rreat_t *rr, addr_t addr, addr_t payload,
+    int detour_type)
+{
+    rreat_detour_t *detour = (rreat_detour_t *) malloc(sizeof(rreat_detour_t));
+    assert(detour != NULL);
+
+    static const _rreat_detour_type_t detours[] = {
+        &_rreat_detour_jmp, &_rreat_detour_fpu,
+    };
+
+    assert(detour_type >= 0 && detour_type < sizeofarray(detours));
+
+    detour->_extra_data = 0;
+    detours[detour_type](rr, detour, addr, payload);
+    return detour;
+}
+
+void rreat_detour_remove(rreat_t *rr, rreat_detour_t *detour)
+{
+    rreat_write(rr, detour->addr, detour->backup, detour->length);
+    if(detour->_extra_data != 0) {
+        rreat_free(rr, detour->_extra_data);
+    }
+    free(detour);
 }
 

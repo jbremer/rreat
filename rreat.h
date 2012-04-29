@@ -40,6 +40,15 @@ typedef struct _rreat_hwbp_t {
     int size;
 } rreat_hwbp_t;
 
+#define RREAT_DETOUR_BACKUP_MAXLENGTH 0x20
+
+typedef struct _rreat_detour_t {
+    addr_t addr;
+    unsigned char backup[RREAT_DETOUR_BACKUP_MAXLENGTH];
+    int length;
+    addr_t _extra_data;
+} rreat_detour_t;
+
 #define RREAT_SUCCESS 0
 #define RREAT_WAIT    1
 
@@ -47,6 +56,9 @@ typedef struct _rreat_hwbp_t {
 #define RREAT_WRITE  2
 #define RREAT_EXEC   4
 #define RREAT_RWX    (RREAT_READ | RREAT_WRITE | RREAT_EXEC)
+
+#define RREAT_DETOUR_JMP 0 // normal jmp `payload' detour, requires 5 bytes.
+#define RREAT_DETOUR_FPU 1 // address is stored as floating point,
 
 #ifndef sizeofarray
 #define sizeofarray(arr) (sizeof(arr) / sizeof((arr)[0]))
@@ -163,5 +175,13 @@ void rreat_debugreg_disable(rreat_t *rr, int thread_id, int hwbp_index);
 
 rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler);
 void rreat_veh_uninstall(rreat_t *rr, rreat_veh_t *veh);
+
+//
+// RREAT Detour API
+//
+
+rreat_detour_t *rreat_detour_address(rreat_t *rr, addr_t addr, addr_t payload,
+    int detour_type);
+void rreat_detour_remove(rreat_t *rr, rreat_detour_t *detour);
 
 #endif
