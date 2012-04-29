@@ -55,6 +55,7 @@ typedef struct _rreat_detour_t {
 #define RREAT_READ   1
 #define RREAT_WRITE  2
 #define RREAT_EXEC   4
+#define RREAT_RW     (RREAT_READ | RREAT_WRITE)
 #define RREAT_RWX    (RREAT_READ | RREAT_WRITE | RREAT_EXEC)
 
 #define RREAT_DETOUR_JMP 0 // normal jmp `payload' detour, requires 5 bytes.
@@ -106,6 +107,9 @@ void rreat_ip_add(rreat_t *rr, int thread_id, int delta);
 // create a new process object
 rreat_t *rreat_process_init(const char *filename);
 
+// terminate a process
+void rreat_process_terminate(rreat_t *rr, unsigned int exit_code);
+
 // create a new thread object (returns thread id)
 int rreat_thread_init(rreat_t *rr, HANDLE handle);
 
@@ -134,6 +138,10 @@ void rreat_thread_while1(rreat_t *rr, int thread_id);
 // waits until the thread hits the given address
 int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
         int milliseconds);
+
+// wait for the first thread to get to the entry point.
+int rreat_process_wait_for_address_insert_while1(rreat_t *rr, int thread_id,
+    addr_t addr, int milliseconds);
 
 //
 // RREAT Simulate API

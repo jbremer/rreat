@@ -23,7 +23,7 @@ static void _rreat_exit_error(const char *func, int line, const char *msg, ...)
 {
     va_list args;
     va_start(args, msg);
-    fprintf(stderr, "%s:%d -> ", func, line);
+    fprintf(stderr, "%s:%d (%d) -> ", func, line, GetLastError());
     vfprintf(stderr, msg, args);
     va_end(args);
     // TODO: cleanup
@@ -133,6 +133,11 @@ rreat_t *rreat_process_init(const char *filename)
     p->handle = pi.hProcess;
     rreat_thread_init(p, pi.hThread);
     return p;
+}
+
+void rreat_process_terminate(rreat_t *rr, unsigned int exit_code)
+{
+    assert(TerminateProcess(rr->handle, exit_code));
 }
 
 // create a new thread object (returns thread id)
@@ -250,12 +255,24 @@ int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
 {
     unsigned long start = GetTickCount();
     while (start + milliseconds > GetTickCount()) {
-        rreat_thread_suspend(rr, thread_id);
-        if(rreat_ip_get(rr, thread_id) == addr) return RREAT_SUCCESS;
         rreat_thread_resume(rr, thread_id);
         Sleep(1);
+        rreat_thread_suspend(rr, thread_id);
+        if(rreat_ip_get(rr, thread_id) == addr) return RREAT_SUCCESS;
     }
     return RREAT_WAIT;
+}
+
+// wait for the thread
+int rreat_process_wait_for_address_insert_while1(rreat_t *rr, int thread_id,
+    addr_t addr, int milliseconds)
+{
+    unsigned char backup[2];
+    rreat_read(rr, addr, backup, sizeof(backup));
+    rreat_write(rr, addr, "\xeb\xfe", 2);
+    int ret = rreat_thread_wait_for_address(rr, thread_id, addr, milliseconds);
+    rreat_write(rr, addr, backup, sizeof(backup));
+    return ret;
 }
 
 //
@@ -522,9 +539,15 @@ static void _rreat_detour_jmp(rreat_t *rr, rreat_detour_t *detour, addr_t addr,
 static void _rreat_detour_fpu(rreat_t *rr, rreat_detour_t *detour, addr_t addr,
     addr_t payload)
 {
-    detour->_extra_data = rreat_alloc(rr, sizeof(double), RREAT_READ);
+    detour->length = 11;
+    detour->addr = addr;
+    rreat_read(rr, detour->addr, detour->backup, detour->length);
+
+    detour->_extra_data = rreat_alloc(rr, sizeof(double), RREAT_RW);
+
     double payload_addr = (double) payload;
     rreat_write(rr, detour->_extra_data, &payload_addr, sizeof(payload_addr));
+
     unsigned char bytes[] = {
         0x55,                               // push ebp
         0xdd, 0x05, 0x00, 0x00, 0x00, 0x00, // fld qword [_extra_data]
@@ -543,7 +566,8 @@ rreat_detour_t *rreat_detour_address(rreat_t *rr, addr_t addr, addr_t payload,
     assert(detour != NULL);
 
     static const _rreat_detour_type_t detours[] = {
-        &_rreat_detour_jmp, &_rreat_detour_fpu,
+        /* RREAT_DETOUR_JMP */ &_rreat_detour_jmp,
+        /* RREAT_DETOUR_FPU */ &_rreat_detour_fpu,
     };
 
     assert(detour_type >= 0 && detour_type < sizeofarray(detours));
