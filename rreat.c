@@ -599,18 +599,59 @@ void rreat_detour_remove(rreat_t *rr, rreat_detour_t *detour)
 // RREAT Generic Syscall Hooking
 //
 
+static const char *g_syshook_names[64 * 1024];
+
 static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
 {
     rreat_syshook_t *syshook = (rreat_syshook_t *) _syshook;
+    // TODO: One Event per Thread (store event handle in TLS)
     while (WaitForSingleObject(syshook->event_local, INFINITE) ==
             WAIT_OBJECT_0) {
         printf("OMG!\n");
+
     }
     return 0;
 }
 
+static void _rreat_syshook_enum_syscalls()
+{
+    static int first = 1;
+    if(first == 0) return;
+    first = 0;
+
+    // no boundary checking at all, I assume ntdll is not malicious..
+    // besides that, we are in our own process, _should_ be fine..
+    BYTE *pImage = (BYTE *) GetModuleHandle("ntdll.dll");
+    IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) pImage;
+    IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(pImage +
+        pImageDosHeader->e_lfanew);
+    IMAGE_DATA_DIRECTORY *pImageDataDirectory = &pImageNtHeaders->
+        OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    IMAGE_EXPORT_DIRECTORY *pImageExportDirectory = (IMAGE_EXPORT_DIRECTORY *)(
+        pImage + pImageDataDirectory->VirtualAddress);
+    DWORD *pdwAddressOfNames = (DWORD *)(pImage +
+        pImageExportDirectory->AddressOfNames);
+    DWORD *pdwAddressOfFunctions = (DWORD *)(pImage +
+        pImageExportDirectory->AddressOfFunctions);
+    for (int i = 0; i < pImageExportDirectory->NumberOfFunctions; i++) {
+        const char *name = (const char *)(pImage + pdwAddressOfNames[i]);
+        unsigned char *addr = pImage + pdwAddressOfFunctions[i];
+        if(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2)) {
+            // does the signature match?
+            // either:   mov eax, syscall_number ; mov ecx, some_value
+            // or:       mov eax, syscall_number ; xor ecx, ecx
+            if(*addr == 0xb8 && (addr[5] == 0xb9 || addr[5] == 0x33)) {
+                unsigned long syscall_number = *(unsigned long *)(addr + 1);
+                g_syshook_names[syscall_number] = name + 2;
+            }
+        }
+    }
+}
+
 rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
 {
+    _rreat_syshook_enum_syscalls();
+
     // x86_64 support only, at the moment.
     static BOOL (*pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
     if(pIsWow64Process == NULL) {
@@ -713,9 +754,20 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
 void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
     const char *name, rreat_syshook_hook_t hook)
 {
-    int index = 0;
+    int index = -1;
+
+    assert(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2));
 
     // convert name to index..
+    for (int i = 0; i < 64 * 1024; i++) {
+        if(g_syshook_names[i] != NULL && !strcmp(name + 2,
+                g_syshook_names[i])) {
+            index = i;
+            break;
+        }
+    }
+
+    assert(index >= 0);
 
     syshook->callback[index] = hook;
 
@@ -727,9 +779,20 @@ void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
 void rreat_syshook_unset_hook(rreat_t *rr, rreat_syshook_t *syshook,
     const char *name)
 {
-    int index = 0;
+    int index = -1;
+
+    assert(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2));
 
     // convert name to index..
+    for (int i = 0; i < 64 * 1024; i++) {
+        if(g_syshook_names[i] != NULL && !strcmp(name + 2,
+                g_syshook_names[i])) {
+            index = i;
+            break;
+        }
+    }
+
+    assert(index >= 0);
 
     syshook->callback[index] = NULL;
 
