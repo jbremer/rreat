@@ -202,8 +202,9 @@ typedef void (*rreat_syshook_hook_t)(rreat_t *rr,
     struct _rreat_syshook_t *syshook, int thread_id);
 
 typedef struct _rreat_syshook_t {
+    rreat_t *_rr;
     // jump instruction with segment prefix (that makes seven bytes.)
-    unsigned char jump_instr[7];
+    unsigned char far_jump_address[6];
     addr_t jump_address;
     // event that the child will signal upon receiving a new syscall
     HANDLE event_local, event_remote;
@@ -219,9 +220,8 @@ typedef struct _rreat_syshook_t {
 } rreat_syshook_t;
 
 rreat_syshook_t *rreat_syshook_init(rreat_t *rr);
-void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
-    const char *name, rreat_syshook_hook_t hook);
-void rreat_syshook_unset_hook(rreat_t *rr, rreat_syshook_t *syshook,
-    const char *name);
+void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
+    rreat_syshook_hook_t hook);
+void rreat_syshook_unset_hook(rreat_syshook_t *syshook, const char *name);
 
 #endif

@@ -262,6 +262,9 @@ void rreat_thread_while1(rreat_t *rr, int thread_id)
 int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
         int milliseconds)
 {
+    // do a check before-hand, so we might not have to wait a millisecond
+    if(rreat_ip_get(rr, thread_id) == addr) return RREAT_SUCCESS;
+
     unsigned long start = GetTickCount();
     while (start + milliseconds > GetTickCount()) {
         rreat_thread_resume(rr, thread_id);
@@ -607,8 +610,50 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
     // TODO: One Event per Thread (store event handle in TLS)
     while (WaitForSingleObject(syshook->event_local, INFINITE) ==
             WAIT_OBJECT_0) {
-        printf("OMG!\n");
+        int thread_id = 0;
+        static int pre_syscall = 1;
 
+        rreat_thread_suspend(syshook->_rr, thread_id);
+
+        if(pre_syscall) {
+            // wait till the thread hits the while(1); instruction (this should
+            // be instant, but we have to check anyway, because otherwise the
+            // stack variabele might be corrupted.)
+            rreat_thread_wait_for_address(syshook->_rr, thread_id,
+                syshook->handler + 0x35, 10);
+
+            CONTEXT ctx; unsigned long param[16];
+            rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
+            rreat_read(syshook->_rr, ctx.Esp, param, sizeof(param));
+
+            for (int i = 0; i < 16; i++) {
+                printf("param[%d]: %p %d\n", i, param[i], param[i]);
+            }
+
+            // jump over the do_not_intervene and notify-event, execute the
+            // actual syscall and get a post-event.
+            rreat_ip_add(syshook->_rr, thread_id, 2);
+            rreat_thread_resume(syshook->_rr, thread_id);
+        }
+        else {
+            rreat_thread_wait_for_address(syshook->_rr, thread_id,
+                syshook->handler + 0x5d, 10);
+
+            CONTEXT ctx; unsigned long param[16];
+            rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
+            rreat_read(syshook->_rr, ctx.Esp, param, sizeof(param));
+
+            printf("eax: %p\n", ctx.Eax);
+            for (int i = 0; i < 16; i++) {
+                printf("param[%d]: %p %d\n", i, param[i], param[i]);
+            }
+
+            // jump over the do_not_intervene and notify-event, execute the
+            // actual syscall and get a post-event.
+            rreat_ip_add(syshook->_rr, thread_id, 2);
+            rreat_thread_resume(syshook->_rr, thread_id);
+        }
+        pre_syscall = !pre_syscall;
     }
     return 0;
 }
@@ -666,54 +711,17 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     rreat_syshook_t *ret = (rreat_syshook_t *) malloc(sizeof(rreat_syshook_t));
     assert(ret != NULL);
 
-    unsigned char bytes[] = {
-        0x60,                               // pushad
-        0x0f, 0xb7, 0xc0,                   // movzx eax, ax
-        // movzx eax, byte [eax+offset]
-        0x0f, 0xb6, 0x80, 0x00, 0x00, 0x00, 0x00,
-        0x85, 0xc0,                         // test eax, eax
-        0x74, 0x1d,                         // jz do_not_intervene
-
-        0x6a, 0x00,                         // push 0
-        0xff, 0x35, 0x00, 0x00, 0x00, 0x00, // push dword [notify-event]
-        0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
-        0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
-        0x89, 0xe2,                         // mov edx, esp
-        // far call to x64 land (only set the last six bytes.)
-        0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
-        // adjust esp!?
-
-        0xeb, 0xfe,                         // while(1);
-
-        // do_not_intervene:
-        0x61,                               // popad
-        // seven bytes for the far jump.
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,             // four bytes for notify-event
-    };
+    ret->_rr = rr;
 
     // ntdll jumps into 64bit from this address.
     ret->jump_address = __readfsdword(0xc0);
 
-    // store the jump instruction
-    memcpy(ret->jump_instr, (void *) ret->jump_address,
-        sizeof(ret->jump_instr));
-
-    // overwrite the two needed x64 far jumps
-    memcpy(&bytes[36], &ret->jump_instr[1], 6);
-    memcpy(&bytes[sizeof(bytes)-11], ret->jump_instr, 7);
+    // store the jump address (we are not interested in the "jmp" part of it.)
+    memcpy(ret->far_jump_address, (void *)(ret->jump_address + 1),
+        sizeof(ret->far_jump_address));
 
     // entry for each syscall number
     ret->table = rreat_alloc(rr, 64 * 1024, RREAT_RW);
-
-    // write address of the table
-    *(addr_t *) &bytes[7] = ret->table;
-
-    ret->handler = rreat_alloc(rr, sizeof(bytes), RREAT_RWX);
-
-    // write the address of notify-event
-    *(addr_t *) &bytes[19] = ret->handler + sizeof(bytes) - 4;
 
     // create the event
     ret->event_local = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -723,11 +731,115 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     assert(DuplicateHandle(GetCurrentProcess(), ret->event_local, rr->handle,
         &ret->event_remote, 0, FALSE, DUPLICATE_SAME_ACCESS));
 
-    // write the event handle
-    *(HANDLE *) &bytes[sizeof(bytes)-4] = ret->event_remote;
+    unsigned char bytes[] = {
+             //
+             // Use the Lookup table to check if we want to intervene with
+             // this syscall.
+             //
+
+    /* 00 */ 0x60,                               // pushad
+    /* 01 */ 0x0f, 0xb7, 0xc0,                   // movzx eax, ax
+    /* 04 */ 0x0f, 0xb6, 0x80, 0x00, 0x00, 0x00, // movzx eax, byte [eax+addr]
+                   0x00,
+    /* 0b */ 0x85, 0xc0,                         // test eax, eax
+    /* 0d */ 0x75, 0x08,                         // jnz do_intervene
+
+             //
+             // We don't want to intervene with this syscall, perform the
+             // original syscall.
+             //
+
+    /* 0f */ 0x61,                               // popad
+    /* 10 */ 0xea, 0x00, 0x00, 0x00, 0x00, 0x00, // original far jump
+                   0x00,
+
+             //
+             // We want to intervene with this syscall, notify our parent.
+             // This event is called a "pre-event", it's right before the
+             // real syscall and allows the parent to inspect and/or modify
+             // parameters.
+             //
+
+    /* 17 */ 0x6a, 0x00,                         // push 0
+    /* 19 */ 0x68, 0x00, 0x00, 0x00, 0x00,       // push notify-event
+    /* 1e */ 0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
+    /* 23 */ 0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
+    /* 28 */ 0x89, 0xe2,                         // mov edx, esp
+    /* 2a */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, // far call for SetEvent()
+                   0x00,
+
+             //
+             // We notified the parent process, restore the stack pointer,
+             // followed by restoring the other registers.
+             //
+
+    /* 31 */ 0x83, 0xc4, 0x0c,                   // add esp, 0x0c
+    /* 34 */ 0x61,                               // popad
+
+             //
+             // The parent process will suspend the thread when it's at this
+             // infinite loop, so it can alter parameters to the real syscall.
+             //
+
+    /* 35 */ 0xeb, 0xfe,                         // while(1);
+
+             //
+             // Perform the real syscall.
+             //
+
+    /* 37 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+             //
+             // Notify the parent process, this time we give it the so-called
+             // "post-event" notification, the parent process will be able to
+             // inspect and/or modify the return value and/or any output
+             // variabeles given through a parameter.
+             //
+
+    /* 3e */ 0x60,                               // pushad
+    /* 3f */ 0x6a, 0x00,                         // push 0
+    /* 41 */ 0x68, 0x00, 0x00, 0x00, 0x00,       // push notify-event
+    /* 46 */ 0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
+    /* 4b */ 0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
+    /* 50 */ 0x89, 0xe2,                         // mov edx, esp
+    /* 52 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, // far call SetEvent()
+                   0x00,
+
+             //
+             // Again we restore the stack pointer and registers.
+             //
+
+    /* 59 */ 0x83, 0xc4, 0x08,                   // add esp, 0x0c
+    /* 5c */ 0x61,                               // popad
+
+             //
+             // The parent will wait 'till the thread hits this infinite loop,
+             // just like it does at the pre-event.
+             //
+
+    /* 5d */ 0xeb, 0xfe,                         // while(1);
+    /* 5f */ 0xc3,                               // retn
+    };
+
+    // allocate enough memory for the handler
+    ret->handler = rreat_alloc(rr, sizeof(bytes), RREAT_RWX);
+
+    // overwrite the address for the far jumps
+    memcpy(&bytes[0x11], ret->far_jump_address, sizeof(ret->far_jump_address));
+    memcpy(&bytes[0x2b], ret->far_jump_address, sizeof(ret->far_jump_address));
+    memcpy(&bytes[0x38], ret->far_jump_address, sizeof(ret->far_jump_address));
+    memcpy(&bytes[0x53], ret->far_jump_address, sizeof(ret->far_jump_address));
+
+    // write address of the table
+    *(addr_t *) &bytes[0x07] = ret->table;
+
+    // write the the notify-event handles
+    *(HANDLE *) &bytes[0x1a] = ret->event_remote;
+    *(HANDLE *) &bytes[0x42] = ret->event_remote;
 
     // hardcode the syscall index, for now
-    *(unsigned long *) &bytes[24] = 0x0b;
+    *(unsigned long *) &bytes[0x1f] = 0x0b;
+    *(unsigned long *) &bytes[0x47] = 0x0b;
 
     // clear the entire lookup table
     unsigned char null[64] = {0};
@@ -751,8 +863,8 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     return ret;
 }
 
-void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
-    const char *name, rreat_syshook_hook_t hook)
+void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
+    rreat_syshook_hook_t hook)
 {
     int index = -1;
 
@@ -773,11 +885,10 @@ void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
 
     // set this index in the child
     unsigned char state = 1;
-    rreat_write(rr, syshook->table + index, &state, sizeof(state));
+    rreat_write(syshook->_rr, syshook->table + index, &state, sizeof(state));
 }
 
-void rreat_syshook_unset_hook(rreat_t *rr, rreat_syshook_t *syshook,
-    const char *name)
+void rreat_syshook_unset_hook(rreat_syshook_t *syshook, const char *name)
 {
     int index = -1;
 
@@ -798,6 +909,6 @@ void rreat_syshook_unset_hook(rreat_t *rr, rreat_syshook_t *syshook,
 
     // unset this index in the child
     unsigned char state = 0;
-    rreat_write(rr, syshook->table + index, &state, sizeof(state));
+    rreat_write(syshook->_rr, syshook->table + index, &state, sizeof(state));
 }
 
