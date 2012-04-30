@@ -10,5 +10,7 @@ rreat.o: rreat.c
 %.exe: %.c rreat.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-test: test-child.exe test-parent.exe
+test: test-child-detour.exe test-parent-detour.exe test-child-syshook.exe \
+		test-parent-syshook.exe
 	test-parent.exe test-child.exe
+	test-parent-syshook.exe test-child-syshook.exe
