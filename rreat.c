@@ -612,6 +612,7 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
             WAIT_OBJECT_0) {
         int thread_id = 0;
         static int pre_syscall = 1;
+        static addr_t arg_addr = 0;
 
         rreat_thread_suspend(syshook->_rr, thread_id);
 
@@ -624,7 +625,10 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
 
             CONTEXT ctx; unsigned long param[16];
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
-            rreat_read(syshook->_rr, ctx.Esp, param, sizeof(param));
+
+            // edx points to the arguments on the stack
+            arg_addr = ctx.Edx;
+            rreat_read(syshook->_rr, ctx.Edx, param, sizeof(param));
 
             for (int i = 0; i < 16; i++) {
                 printf("param[%d]: %p %d\n", i, param[i], param[i]);
@@ -640,7 +644,7 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
 
             CONTEXT ctx; unsigned long param[16];
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
-            rreat_read(syshook->_rr, ctx.Esp, param, sizeof(param));
+            rreat_read(syshook->_rr, arg_addr, param, sizeof(param));
 
             printf("eax: %p\n", ctx.Eax);
             for (int i = 0; i < 16; i++) {
