@@ -47,6 +47,6 @@ int main(int argc, char *argv[])
 
     rreat_thread_resume(rr, 0);
 
-    Sleep(500);
+    Sleep(1000);
     rreat_process_terminate(rr, 0);
 }
