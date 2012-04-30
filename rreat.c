@@ -790,35 +790,41 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     /* 37 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
              //
+             // For some reason we have to cleanup after this syscall..
+             //
+
+    /* 3e */ 0x83, 0xc4, 0x04,                   // add esp, 4
+
+             //
              // Notify the parent process, this time we give it the so-called
              // "post-event" notification, the parent process will be able to
              // inspect and/or modify the return value and/or any output
              // variabeles given through a parameter.
              //
 
-    /* 3e */ 0x60,                               // pushad
-    /* 3f */ 0x6a, 0x00,                         // push 0
-    /* 41 */ 0x68, 0x00, 0x00, 0x00, 0x00,       // push notify-event
-    /* 46 */ 0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
-    /* 4b */ 0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
-    /* 50 */ 0x89, 0xe2,                         // mov edx, esp
-    /* 52 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, // far call SetEvent()
+    /* 41 */ 0x60,                               // pushad
+    /* 42 */ 0x6a, 0x00,                         // push 0
+    /* 44 */ 0x68, 0x00, 0x00, 0x00, 0x00,       // push notify-event
+    /* 49 */ 0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
+    /* 4e */ 0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
+    /* 53 */ 0x89, 0xe2,                         // mov edx, esp
+    /* 55 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, // far call SetEvent()
                    0x00,
 
              //
              // Again we restore the stack pointer and registers.
              //
 
-    /* 59 */ 0x83, 0xc4, 0x08,                   // add esp, 0x0c
-    /* 5c */ 0x61,                               // popad
+    /* 5c */ 0x83, 0xc4, 0x0c,                   // add esp, 0x0c
+    /* 5f */ 0x61,                               // popad
 
              //
              // The parent will wait 'till the thread hits this infinite loop,
              // just like it does at the pre-event.
              //
 
-    /* 5d */ 0xeb, 0xfe,                         // while(1);
-    /* 5f */ 0xc3,                               // retn
+    /* 60 */ 0xeb, 0xfe,                         // while(1);
+    /* 62 */ 0xc3,                               // retn
     };
 
     // allocate enough memory for the handler
@@ -828,18 +834,18 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     memcpy(&bytes[0x11], ret->far_jump_address, sizeof(ret->far_jump_address));
     memcpy(&bytes[0x2b], ret->far_jump_address, sizeof(ret->far_jump_address));
     memcpy(&bytes[0x38], ret->far_jump_address, sizeof(ret->far_jump_address));
-    memcpy(&bytes[0x53], ret->far_jump_address, sizeof(ret->far_jump_address));
+    memcpy(&bytes[0x56], ret->far_jump_address, sizeof(ret->far_jump_address));
 
     // write address of the table
     *(addr_t *) &bytes[0x07] = ret->table;
 
     // write the the notify-event handles
     *(HANDLE *) &bytes[0x1a] = ret->event_remote;
-    *(HANDLE *) &bytes[0x42] = ret->event_remote;
+    *(HANDLE *) &bytes[0x45] = ret->event_remote;
 
     // hardcode the syscall index, for now
     *(unsigned long *) &bytes[0x1f] = 0x0b;
-    *(unsigned long *) &bytes[0x47] = 0x0b;
+    *(unsigned long *) &bytes[0x4a] = 0x0b;
 
     // clear the entire lookup table
     unsigned char null[64] = {0};
