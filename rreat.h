@@ -192,4 +192,36 @@ rreat_detour_t *rreat_detour_address(rreat_t *rr, addr_t addr, addr_t payload,
     int detour_type);
 void rreat_detour_remove(rreat_t *rr, rreat_detour_t *detour);
 
+//
+// RREAT Generic Syscall Hooking
+//
+
+struct _rreat_syshook_t;
+
+typedef void (*rreat_syshook_hook_t)(rreat_t *rr,
+    struct _rreat_syshook_t *syshook, int thread_id);
+
+typedef struct _rreat_syshook_t {
+    // jump instruction with segment prefix (that makes seven bytes.)
+    unsigned char jump_instr[7];
+    addr_t jump_address;
+    // event that the child will signal upon receiving a new syscall
+    HANDLE event_local, event_remote;
+    // thread handle of notify thread
+    HANDLE thread_handle;
+    // 64k table containing each index, set the index if the parent
+    // has to handle it
+    addr_t table;
+    // handler in the child which will handle each syscall
+    addr_t handler;
+    // lookup table in the parent, which holds callbacks
+    rreat_syshook_hook_t callback[64 * 1024];
+} rreat_syshook_t;
+
+rreat_syshook_t *rreat_syshook_init(rreat_t *rr);
+void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
+    const char *name, rreat_syshook_hook_t hook);
+void rreat_syshook_unset_hook(rreat_t *rr, rreat_syshook_t *syshook,
+    const char *name);
+
 #endif

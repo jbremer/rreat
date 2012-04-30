@@ -19,6 +19,15 @@ static unsigned long roundup2(unsigned long v) {
     return v |= v >> 8, v |= v >> 16, ++v;
 }
 
+#ifndef __MSVC__
+static inline addr_t __readfsdword(unsigned long index)
+{
+    addr_t ret;
+    __asm__("movl %%fs:(%%eax), %0" : "=r" (ret) : "a" (index));
+    return ret;
+}
+#endif
+
 static void _rreat_exit_error(const char *func, int line, const char *msg, ...)
 {
     va_list args;
@@ -584,5 +593,148 @@ void rreat_detour_remove(rreat_t *rr, rreat_detour_t *detour)
         rreat_free(rr, detour->_extra_data);
     }
     free(detour);
+}
+
+//
+// RREAT Generic Syscall Hooking
+//
+
+static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
+{
+    rreat_syshook_t *syshook = (rreat_syshook_t *) _syshook;
+    while (WaitForSingleObject(syshook->event_local, INFINITE) ==
+            WAIT_OBJECT_0) {
+        printf("OMG!\n");
+    }
+    return 0;
+}
+
+rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
+{
+    // x86_64 support only, at the moment.
+    static BOOL (*pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
+    if(pIsWow64Process == NULL) {
+        pIsWow64Process = (BOOL(*)(HANDLE, PBOOL)) GetProcAddress(
+            g_hKernel32, "IsWow64Process");
+        assert(pIsWow64Process != NULL);
+    }
+
+    BOOL bIsWow64;
+    assert(pIsWow64Process(rr->handle, &bIsWow64) && bIsWow64 != FALSE);
+
+    rreat_syshook_t *ret = (rreat_syshook_t *) malloc(sizeof(rreat_syshook_t));
+    assert(ret != NULL);
+
+    unsigned char bytes[] = {
+        0x60,                               // pushad
+        0x0f, 0xb7, 0xc0,                   // movzx eax, ax
+        // movzx eax, byte [eax+offset]
+        0x0f, 0xb6, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x85, 0xc0,                         // test eax, eax
+        0x75, 0x1c,                         // jnz do_not_intervene
+
+        0x6a, 0x00,                         // push 0
+        0xff, 0x35, 0x00, 0x00, 0x00, 0x00, // push dword [notify-event]
+        0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
+        0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
+        0x89, 0xe2,                         // mov edx, esp
+        // far call to x64 land (only set the last six bytes.)
+        0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+        // adjust esp!?
+
+        0xeb, 0xfe,                         // while(1);
+
+        // do_not_intervene:
+        0x61,                               // popad
+        // seven bytes for the far jump.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,             // four bytes for notify-event
+    };
+
+    // ntdll jumps into 64bit from this address.
+    ret->jump_address = __readfsdword(0xc0);
+
+    // store the jump instruction
+    memcpy(ret->jump_instr, (void *) ret->jump_address,
+        sizeof(ret->jump_instr));
+
+    // overwrite the two needed x64 far jumps
+    memcpy(&bytes[36], &ret->jump_instr[1], 6);
+    memcpy(&bytes[sizeof(bytes)-11], ret->jump_instr, 7);
+
+    // entry for each syscall number
+    ret->table = rreat_alloc(rr, 64 * 1024, RREAT_RW);
+
+    // write address of the table
+    *(addr_t *) &bytes[7] = ret->table;
+
+    ret->handler = rreat_alloc(rr, sizeof(bytes), RREAT_RWX);
+
+    // write the address of notify-event
+    *(addr_t *) &bytes[19] = ret->handler + sizeof(bytes) - 4;
+
+    // create the event
+    ret->event_local = CreateEvent(NULL, FALSE, FALSE, NULL);
+    assert(ret->event_local != NULL);
+
+    // duplicate the event, for interprocess communication
+    assert(DuplicateHandle(GetCurrentProcess(), ret->event_local, rr->handle,
+        &ret->event_remote, 0, FALSE, DUPLICATE_SAME_ACCESS));
+
+    // write the event handle
+    *(HANDLE *) &bytes[sizeof(bytes)-4] = ret->event_remote;
+
+    // hardcode the syscall index, for now
+    *(unsigned long *) &bytes[24] = 0x0b;
+
+    // clear the entire lookup table
+    unsigned char null[64] = {0};
+    for (int i = 0; i < 1024; i++) {
+        rreat_write(rr, ret->table + 64 * i, null, 64);
+    }
+
+    // write the handler
+    rreat_write(rr, ret->handler, bytes, sizeof(bytes));
+
+    // write a jump at the original x64 land far jump
+    unsigned char jump[5] = {0xe9};
+    *(addr_t *) &jump[1] = ret->handler - ret->jump_address - 5;
+    rreat_write(rr, ret->jump_address, jump, sizeof(jump));
+
+    // at last, create a thread that will wait for notifications
+    ret->thread_handle = CreateThread(NULL, 0, &_rreat_syshook_worker, ret,
+        0, NULL);
+    assert(ret->thread_handle != INVALID_HANDLE_VALUE);
+
+    return ret;
+}
+
+void rreat_syshook_set_hook(rreat_t *rr, rreat_syshook_t *syshook,
+    const char *name, rreat_syshook_hook_t hook)
+{
+    int index = 0;
+
+    // convert name to index..
+
+    syshook->callback[index] = hook;
+
+    // set this index in the child
+    unsigned char state = 1;
+    rreat_write(rr, syshook->table + index, &state, sizeof(state));
+}
+
+void rreat_syshook_unset_hook(rreat_t *rr, rreat_syshook_t *syshook,
+    const char *name)
+{
+    int index = 0;
+
+    // convert name to index..
+
+    syshook->callback[index] = NULL;
+
+    // unset this index in the child
+    unsigned char state = 0;
+    rreat_write(rr, syshook->table + index, &state, sizeof(state));
 }
 
