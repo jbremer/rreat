@@ -12,5 +12,5 @@ rreat.o: rreat.c
 
 test: test-child-detour.exe test-parent-detour.exe test-child-syshook.exe \
 		test-parent-syshook.exe
-	test-parent.exe test-child.exe
+	test-parent-detour.exe test-child-detour.exe
 	test-parent-syshook.exe test-child-syshook.exe
