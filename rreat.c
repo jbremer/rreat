@@ -631,7 +631,7 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
         // movzx eax, byte [eax+offset]
         0x0f, 0xb6, 0x80, 0x00, 0x00, 0x00, 0x00,
         0x85, 0xc0,                         // test eax, eax
-        0x75, 0x1c,                         // jnz do_not_intervene
+        0x74, 0x1d,                         // jz do_not_intervene
 
         0x6a, 0x00,                         // push 0
         0xff, 0x35, 0x00, 0x00, 0x00, 0x00, // push dword [notify-event]
