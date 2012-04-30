@@ -616,11 +616,11 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
         rreat_thread_suspend(syshook->_rr, thread_id);
 
         if(pre_syscall) {
-            // wait till the thread hits the while(1); instruction (this should
+            // wait till the thread hits the infinite loop (this should
             // be instant, but we have to check anyway, because otherwise the
             // stack variabele might be corrupted.)
-            rreat_thread_wait_for_address(syshook->_rr, thread_id,
-                syshook->handler + 0x35, 10);
+            assert(rreat_thread_wait_for_address(syshook->_rr, thread_id,
+                syshook->handler + 0x35, 100) == RREAT_SUCCESS);
 
             CONTEXT ctx; unsigned long param[16];
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
@@ -630,14 +630,13 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
                 printf("param[%d]: %p %d\n", i, param[i], param[i]);
             }
 
-            // jump over the do_not_intervene and notify-event, execute the
-            // actual syscall and get a post-event.
+            // jump over the infinite loop and execute the actual syscall
             rreat_ip_add(syshook->_rr, thread_id, 2);
             rreat_thread_resume(syshook->_rr, thread_id);
         }
         else {
-            rreat_thread_wait_for_address(syshook->_rr, thread_id,
-                syshook->handler + 0x5d, 10);
+            assert(rreat_thread_wait_for_address(syshook->_rr, thread_id,
+                syshook->handler + 0x60, 100) == RREAT_SUCCESS);
 
             CONTEXT ctx; unsigned long param[16];
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
