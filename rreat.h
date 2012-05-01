@@ -107,6 +107,12 @@ void rreat_ip_add(rreat_t *rr, int thread_id, int delta);
 // create a new process object
 rreat_t *rreat_process_init(const char *filename);
 
+// attach to a process
+rreat_t *rreat_process_attach(unsigned long pid, unsigned long desired_access);
+
+// open a handle to each thread, only useful after attaching to a process
+void rreat_attach_all_threads(rreat_t *rr);
+
 // terminate a process
 void rreat_process_terminate(rreat_t *rr, unsigned int exit_code);
 

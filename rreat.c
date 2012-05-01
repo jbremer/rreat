@@ -10,7 +10,7 @@
 #define EXITERR(msg, ...) _rreat_exit_error(__FUNCTION__, __LINE__, \
         msg, ##__VA_ARGS__)
 
-// _MSC_VER seems to a good indicator for the MSVC compiler, see also
+// _MSC_VER seems to be a good indicator for the MSVC compiler, see also
 // http://msdn.microsoft.com/en-us/library/b0084kay(v=vs.80).aspx
 // but I think __MSVC__ is easier to read.
 #ifdef _MSC_VER
@@ -28,7 +28,8 @@ static HMODULE g_ntdll;
 
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
-static unsigned long roundup2(unsigned long v) {
+static unsigned long roundup2(unsigned long v)
+{
     v--, v |= v >> 1, v |= v >> 2, v |= v >> 4;
     return v |= v >> 8, v |= v >> 16, ++v;
 }
@@ -68,20 +69,20 @@ void rreat_init()
 addr_t rreat_alloc(rreat_t *rr, unsigned long size, unsigned long flags)
 {
     static const unsigned long table[8] = {
-        /* 0 */ 0,
-        /* 1 */ PAGE_READONLY,
-        /* 2 */ PAGE_READWRITE,
-        /* 3 */ PAGE_READWRITE,
-        /* 4 */ PAGE_EXECUTE,
-        /* 5 */ PAGE_EXECUTE_READ,
-        /* 6 */ PAGE_EXECUTE_READWRITE,
-        /* 7 */ PAGE_EXECUTE_READWRITE,
+        /*     */ 0,
+        /* R   */ PAGE_READONLY,
+        /*  W  */ PAGE_READWRITE,
+        /* RW  */ PAGE_READWRITE,
+        /*   X */ PAGE_EXECUTE,
+        /* R X */ PAGE_EXECUTE_READ,
+        /*  WX */ PAGE_EXECUTE_READWRITE,
+        /* RWX */ PAGE_EXECUTE_READWRITE,
     };
 
     assert(flags != 0 && flags < sizeofarray(table));
 
     addr_t ret = (addr_t) VirtualAllocEx(rr->handle, NULL, roundup2(size),
-            MEM_COMMIT | MEM_RESERVE, table[flags]);
+        MEM_COMMIT | MEM_RESERVE, table[flags]);
     assert(ret != 0);
     return ret;
 }
@@ -110,7 +111,7 @@ void rreat_read(rreat_t *rr, addr_t addr, void *dest, unsigned long size)
 //
 
 void rreat_context_get(rreat_t *rr, int thread_id, CONTEXT *ctx,
-        unsigned long flags)
+    unsigned long flags)
 {
     rreat_thread_t *t = rreat_thread_by_id(rr, thread_id);
     ctx->ContextFlags = flags;
@@ -152,12 +153,31 @@ rreat_t *rreat_process_init(const char *filename)
     STARTUPINFO si = {0}; PROCESS_INFORMATION pi = {0};
     assert(CreateProcess(filename, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED,
         NULL, NULL, &si, &pi));
-    rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
-    assert(p != NULL);
-    p->process_id = pi.dwProcessId;
-    p->handle = pi.hProcess;
-    rreat_thread_init(p, pi.hThread);
-    return p;
+    rreat_t *rr = (rreat_t *) calloc(1, sizeof(rreat_t));
+    assert(rr != NULL);
+
+    rr->process_id = pi.dwProcessId;
+    rr->handle = pi.hProcess;
+    rreat_thread_init(rr, pi.hThread);
+    return rr;
+}
+
+// attach to a process
+rreat_t *rreat_process_attach(unsigned long pid, unsigned long desired_access)
+{
+    rreat_t *rr = (rreat_t *) calloc(1, sizeof(rreat_t));
+    assert(rr != NULL);
+
+    rr->process_id = pid;
+    rr->handle = OpenProcess(desired_access, FALSE, pid);
+    assert(rr->handle != NULL);
+    return rr;
+}
+
+// open a handle to each thread, only useful after attaching to a process
+void rreat_attach_all_threads(rreat_t *rr)
+{
+    // TODO: ...
 }
 
 void rreat_process_terminate(rreat_t *rr, unsigned int exit_code)
@@ -171,7 +191,7 @@ int rreat_thread_init(rreat_t *rr, HANDLE handle)
     int newsize = roundup2(rr->thread_count + 1);
     if(roundup2(rr->thread_count) != newsize) {
         rr->threads = (rreat_thread_t *) realloc(rr->threads, newsize);
-        assert(rr->threads);
+        assert(rr->threads != NULL);
     }
     rreat_thread_t *t = &rr->threads[rr->thread_count];
     t->thread_id = rr->thread_count++;
@@ -339,7 +359,7 @@ int rreat_simulate_run(rreat_simulate_t *sim, int thread_id, int milliseconds)
 
     // wait until we actually reach our special code
     assert(rreat_thread_wait_for_address(sim->_rr, thread_id,
-                sim->_mem, milliseconds) == RREAT_SUCCESS);
+        sim->_mem, milliseconds) == RREAT_SUCCESS);
 
     // move past the while(1) instruction
     rreat_ip_add(sim->_rr, thread_id, 2);
@@ -351,7 +371,7 @@ int rreat_simulate_run(rreat_simulate_t *sim, int thread_id, int milliseconds)
     // processing, assume we have time left)
     milliseconds = start + milliseconds - GetTickCount();
     return rreat_thread_wait_for_address(sim->_rr, thread_id,
-            sim->_mem + sim->end - sim->start, milliseconds);
+        sim->_mem + sim->end - sim->start, milliseconds);
 }
 
 // restore the thread to the real address
@@ -371,7 +391,7 @@ void rreat_simulate_free(rreat_simulate_t *sim)
 
 // single-threaded blocking `simulate' event.
 void rreat_simulate_single(rreat_t *rr, addr_t start, addr_t end,
-        int milliseconds, int thread_id)
+    int milliseconds, int thread_id)
 {
     rreat_simulate_t *sim = rreat_simulate_init(rr);
     rreat_simulate_address(sim, start, end);
@@ -393,30 +413,30 @@ static void _set_bits(unsigned long *value, int offset, int bits, int newval)
 }
 
 rreat_hwbp_t *rreat_debugreg_trap(rreat_t *rr, int thread_id, int hwbp_index,
-        addr_t addr, int flags, int size)
+    addr_t addr, int flags, int size)
 {
     static const unsigned char table_flags[5] = {
-        /* 0 */ 0xff, // invalid
-        /* 1 */ 3,  // read
-        /* 2 */ 1,  // write
-        /* 3 */ 3,  // read or write
-        /* 4 */ 0,  // exec
+        /*     */ 0xff, // invalid
+        /* R   */ 3,
+        /*  W  */ 1,
+        /* RW  */ 3,
+        /*   X */ 0,
     };
     static const unsigned char table_size[9] = {
-        /* 0 */ 0xff, // invalid
-        /* 1 */ 0,  // 1 byte
-        /* 2 */ 1,  // 2 bytes
-        /* 3 */ 0xff, // invalid
-        /* 4 */ 3,  // 4 bytes
-        /* 5 */ 0xff, // invalid
-        /* 6 */ 0xff, // invalid
-        /* 7 */ 0xff, // invalid
-        /* 8 */ 2,  // 8 bytes
+        /* 0 */ 0xff,
+        /* 1 */ 0,    // 1 byte
+        /* 2 */ 1,    // 2 bytes
+        /* 3 */ 0xff,
+        /* 4 */ 3,    // 4 bytes
+        /* 5 */ 0xff,
+        /* 6 */ 0xff,
+        /* 7 */ 0xff,
+        /* 8 */ 2,    // 8 bytes
     };
     assert(hwbp_index >= 0 && hwbp_index < 4);
     assert(flags > 0 && flags < sizeofarray(table_flags));
     assert(size > 0 && size < sizeofarray(table_size) &&
-            table_size[size] != 0xff);
+        table_size[size] != 0xff);
 
     rreat_hwbp_t *hwbp = (rreat_hwbp_t *) calloc(1, sizeof(rreat_hwbp_t));
     assert(hwbp != NULL);
@@ -489,14 +509,14 @@ rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler)
 
     // store address of AddVectoredExceptionHandler
     *(addr_t *) &install[1] = (addr_t) GetProcAddress(g_kernel32,
-            "AddVectoredExceptionHandler");
+        "AddVectoredExceptionHandler");
 
     // store address of the exception handler
     *(addr_t *) &install[6] = addr;
 
     // store the address of RemoveVectoredExceptionHandler
     *(addr_t *) &remove[1] = (addr_t) GetProcAddress(g_kernel32,
-            "RemoveVectoredExceptionHandler");
+        "RemoveVectoredExceptionHandler");
 
     // store the address where to write the handle to the exception handler
     // this can be used later to uninstall the exception handler
@@ -511,7 +531,7 @@ rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler)
 
     // now install the handler
     HANDLE thread = CreateRemoteThread(rr->handle, NULL, 0,
-                (LPTHREAD_START_ROUTINE) mem, NULL, 0, NULL);
+        (LPTHREAD_START_ROUTINE) mem, NULL, 0, NULL);
     assert(thread != INVALID_HANDLE_VALUE);
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);
@@ -523,7 +543,7 @@ void rreat_veh_uninstall(rreat_t *rr, rreat_veh_t *veh)
 {
     // call the remove handler
     HANDLE thread = CreateRemoteThread(rr->handle, NULL, 0,
-            veh->remove_handler, NULL, 0, NULL);
+        veh->remove_handler, NULL, 0, NULL);
     assert(thread != INVALID_HANDLE_VALUE);
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);
@@ -580,6 +600,8 @@ static void _rreat_detour_fpu(rreat_t *rr, rreat_detour_t *detour, addr_t addr,
 rreat_detour_t *rreat_detour_address(rreat_t *rr, addr_t addr, addr_t payload,
     int detour_type)
 {
+    assert(addr != 0 && payload != 0);
+
     rreat_detour_t *detour = (rreat_detour_t *) malloc(sizeof(rreat_detour_t));
     assert(detour != NULL);
 
