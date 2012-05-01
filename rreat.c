@@ -5,7 +5,7 @@
 #include "rreat.h"
 
 #define assert(expr) if((expr) == 0) EXITERR("%s", #expr)
-// #define assert(expr) expr
+#define raise(fmt, ...) EXITERR(fmt, ##__VA_ARGS__)
 
 #define EXITERR(msg, ...) _rreat_exit_error(__FUNCTION__, __LINE__, \
         msg, ##__VA_ARGS__)
@@ -28,7 +28,8 @@ static inline addr_t __readfsdword(unsigned long index)
 }
 #endif
 
-static void _rreat_exit_error(const char *func, int line, const char *msg, ...)
+static __attribute__((noreturn)) void _rreat_exit_error(const char *func,
+    int line, const char *msg, ...)
 {
     va_list args;
     va_start(args, msg);
@@ -699,6 +700,19 @@ static void _rreat_syshook_enum_syscalls()
     }
 }
 
+static unsigned short _rreat_syshook_syscall_name_to_number(const char *name)
+{
+    assert(name != NULL);
+    assert(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2));
+    for (int i = 0; i < 64 * 1024; i++) {
+        if(g_syshook_names[i] != NULL &&
+                !strcmp(g_syshook_names[i], name + 2)) {
+            return (unsigned short) i;
+        }
+    }
+    raise("Syscall name `%s' not found.", name);
+}
+
 rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
 {
     _rreat_syshook_enum_syscalls();
@@ -849,9 +863,10 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     *(HANDLE *) &bytes[0x1a] = ret->event_remote;
     *(HANDLE *) &bytes[0x45] = ret->event_remote;
 
-    // hardcode the syscall index, for now
-    *(unsigned long *) &bytes[0x1f] = 0x0b;
-    *(unsigned long *) &bytes[0x4a] = 0x0b;
+    *(unsigned long *) &bytes[0x1f] =
+        _rreat_syshook_syscall_name_to_number("ZwSetEvent");
+    *(unsigned long *) &bytes[0x4a] =
+        _rreat_syshook_syscall_name_to_number("ZwSetEvent");
 
     // clear the entire lookup table
     unsigned char null[64] = {0};
@@ -878,20 +893,7 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
 void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
     rreat_syshook_hook_t hook)
 {
-    int index = -1;
-
-    assert(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2));
-
-    // convert name to index..
-    for (int i = 0; i < 64 * 1024; i++) {
-        if(g_syshook_names[i] != NULL && !strcmp(name + 2,
-                g_syshook_names[i])) {
-            index = i;
-            break;
-        }
-    }
-
-    assert(index >= 0);
+    int index = _rreat_syshook_syscall_name_to_number(name);
 
     syshook->callback[index] = hook;
 
@@ -902,20 +904,7 @@ void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
 
 void rreat_syshook_unset_hook(rreat_syshook_t *syshook, const char *name)
 {
-    int index = -1;
-
-    assert(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2));
-
-    // convert name to index..
-    for (int i = 0; i < 64 * 1024; i++) {
-        if(g_syshook_names[i] != NULL && !strcmp(name + 2,
-                g_syshook_names[i])) {
-            index = i;
-            break;
-        }
-    }
-
-    assert(index >= 0);
+    int index = _rreat_syshook_syscall_name_to_number(name);
 
     syshook->callback[index] = NULL;
 
