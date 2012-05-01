@@ -10,7 +10,8 @@
 #define EXITERR(msg, ...) _rreat_exit_error(__FUNCTION__, __LINE__, \
         msg, ##__VA_ARGS__)
 
-static HMODULE g_hKernel32;
+static HMODULE g_kernel32;
+static HMODULE g_ntdll;
 
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
@@ -23,7 +24,7 @@ static unsigned long roundup2(unsigned long v) {
 static inline addr_t __readfsdword(unsigned long index)
 {
     addr_t ret;
-    __asm__("movl %%fs:(%%eax), %0" : "=r" (ret) : "a" (index));
+    __asm__("movl %%fs:(%1), %0" : "=r" (ret) : "r" (index));
     return ret;
 }
 #endif
@@ -42,8 +43,9 @@ static __attribute__((noreturn)) void _rreat_exit_error(const char *func,
 
 void rreat_init()
 {
-    g_hKernel32 = GetModuleHandle("kernel32.dll");
-    assert(g_hKernel32 != NULL);
+    g_kernel32 = GetModuleHandle("kernel32.dll");
+    g_ntdll = GetModuleHandle("ntdll.dll");
+    assert(g_kernel32 != NULL && g_ntdll != NULL);
 }
 
 //
@@ -67,7 +69,7 @@ addr_t rreat_alloc(rreat_t *rr, unsigned long size, unsigned long flags)
 
     addr_t ret = (addr_t) VirtualAllocEx(rr->handle, NULL, roundup2(size),
             MEM_COMMIT | MEM_RESERVE, table[flags]);
-    assert(ret);
+    assert(ret != 0);
     return ret;
 }
 
@@ -138,7 +140,7 @@ rreat_t *rreat_process_init(const char *filename)
     assert(CreateProcess(filename, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED,
         NULL, NULL, &si, &pi));
     rreat_t *p = (rreat_t *) calloc(1, sizeof(rreat_t));
-    assert(p);
+    assert(p != NULL);
     p->process_id = pi.dwProcessId;
     p->handle = pi.hProcess;
     rreat_thread_init(p, pi.hThread);
@@ -193,31 +195,29 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename)
         sizeof(mi)));
     void *mem = VirtualAlloc(NULL, mi.SizeOfImage, MEM_COMMIT | MEM_RESERVE,
         PAGE_READWRITE);
-    assert(mem);
+    assert(mem != NULL);
     rreat_read(rr, (addr_t) mi.lpBaseOfDll, mem, mi.SizeOfImage);
     // for now let's hope our binary doesn't destroy the PE headers
-    IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) mem;
-    if(pImageDosHeader->e_lfanew >= 0 &&
-            (unsigned long) pImageDosHeader->e_lfanew < mi.SizeOfImage) {
-        IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(
-            (unsigned char *) mem + pImageDosHeader->e_lfanew);
+    IMAGE_DOS_HEADER *dos_header = (IMAGE_DOS_HEADER *) mem;
+    if(dos_header->e_lfanew >= 0 &&
+            (unsigned long) dos_header->e_lfanew < mi.SizeOfImage) {
+        IMAGE_NT_HEADERS *nt_headers = (IMAGE_NT_HEADERS *)(
+            (unsigned char *) mem + dos_header->e_lfanew);
         // needs more checking.
-        IMAGE_SECTION_HEADER *pImageSectionHeader = (IMAGE_SECTION_HEADER *)(
-            (unsigned char *) &pImageNtHeaders->OptionalHeader +
-            pImageNtHeaders->FileHeader.SizeOfOptionalHeader);
-        for (int i = 0; i < pImageNtHeaders->FileHeader.NumberOfSections;
-                i++, pImageSectionHeader++) {
+        IMAGE_SECTION_HEADER *section_header = (IMAGE_SECTION_HEADER *)(
+            (unsigned char *) &nt_headers->OptionalHeader +
+            nt_headers->FileHeader.SizeOfOptionalHeader);
+        for (int i = 0; i < nt_headers->FileHeader.NumberOfSections;
+                i++, section_header++) {
             // IDA will think the binary is still in raw-offset mode
             // so we have to set the raw offset & raw size to the virtual
             // address equivalents
-            pImageSectionHeader->PointerToRawData =
-                pImageSectionHeader->VirtualAddress;
-            pImageSectionHeader->SizeOfRawData =
-                pImageSectionHeader->Misc.VirtualSize;
+            section_header->PointerToRawData = section_header->VirtualAddress;
+            section_header->SizeOfRawData = section_header->Misc.VirtualSize;
         }
     }
     FILE *fp = fopen(filename, "wb");
-    assert(fp);
+    assert(fp != NULL);
     fwrite(mem, 1, mi.SizeOfImage, fp);
     fclose(fp);
     assert(VirtualFree(mem, 0, MEM_RELEASE));
@@ -229,19 +229,10 @@ void rreat_jitdbg_attach(rreat_t *rr)
     char path[MAX_PATH];
     _snprintf(path, sizeofarray(path), RREAT_JITDEBUGGER, rr->process_id);
     STARTUPINFO si = {0}; PROCESS_INFORMATION pi = {0};
-    CreateProcess(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-}
-
-// create a dummy thread
-int rreat_thread_dummy(rreat_t *rr)
-{
-    addr_t addr = rreat_alloc(rr, 2, RREAT_RWX);
-    HANDLE handle = CreateRemoteThread(rr->handle, NULL, 0,
-        (LPTHREAD_START_ROUTINE) addr, NULL, 0, NULL);
-    assert(handle != INVALID_HANDLE_VALUE);
-    rreat_thread_init(rr, handle);
-    return rr->thread_count - 1;
+    assert(CreateProcess(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si,
+        &pi));
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
 }
 
 // places the thread in a while(1) loop
@@ -297,7 +288,7 @@ rreat_simulate_t *rreat_simulate_init(rreat_t *rr)
 {
     rreat_simulate_t *ret = (rreat_simulate_t *)
         calloc(1, sizeof(rreat_simulate_t));
-    assert(ret);
+    assert(ret != NULL);
     ret->_rr = rr;
     return ret;
 }
@@ -415,6 +406,7 @@ rreat_hwbp_t *rreat_debugreg_trap(rreat_t *rr, int thread_id, int hwbp_index,
             table_size[size] != 0xff);
 
     rreat_hwbp_t *hwbp = (rreat_hwbp_t *) calloc(1, sizeof(rreat_hwbp_t));
+    assert(hwbp != NULL);
 
     CONTEXT ctx;
     rreat_context_get(rr, thread_id, &ctx, CONTEXT_DEBUG_REGISTERS);
@@ -483,14 +475,14 @@ rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler)
     addr_t mem = rreat_alloc(rr, sizeof(install) + sizeof(remove), RREAT_RWX);
 
     // store address of AddVectoredExceptionHandler
-    *(addr_t *) &install[1] = (addr_t) GetProcAddress(g_hKernel32,
+    *(addr_t *) &install[1] = (addr_t) GetProcAddress(g_kernel32,
             "AddVectoredExceptionHandler");
 
     // store address of the exception handler
     *(addr_t *) &install[6] = addr;
 
     // store the address of RemoveVectoredExceptionHandler
-    *(addr_t *) &remove[1] = (addr_t) GetProcAddress(g_hKernel32,
+    *(addr_t *) &remove[1] = (addr_t) GetProcAddress(g_kernel32,
             "RemoveVectoredExceptionHandler");
 
     // store the address where to write the handle to the exception handler
@@ -670,24 +662,24 @@ static void _rreat_syshook_enum_syscalls()
 
     // no boundary checking at all, I assume ntdll is not malicious..
     // besides that, we are in our own process, _should_ be fine..
-    BYTE *pImage = (BYTE *) GetModuleHandle("ntdll.dll");
-    IMAGE_DOS_HEADER *pImageDosHeader = (IMAGE_DOS_HEADER *) pImage;
-    IMAGE_NT_HEADERS *pImageNtHeaders = (IMAGE_NT_HEADERS *)(pImage +
-        pImageDosHeader->e_lfanew);
-    IMAGE_DATA_DIRECTORY *pImageDataDirectory = &pImageNtHeaders->
+    BYTE *image = (BYTE *) g_ntdll;
+    IMAGE_DOS_HEADER *dos_header = (IMAGE_DOS_HEADER *) image;
+    IMAGE_NT_HEADERS *nt_headers = (IMAGE_NT_HEADERS *)(image +
+        dos_header->e_lfanew);
+    IMAGE_DATA_DIRECTORY *data_directory = &nt_headers->
         OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    IMAGE_EXPORT_DIRECTORY *pImageExportDirectory = (IMAGE_EXPORT_DIRECTORY *)(
-        pImage + pImageDataDirectory->VirtualAddress);
-    DWORD *pdwAddressOfNames = (DWORD *)(pImage +
-        pImageExportDirectory->AddressOfNames);
-    DWORD *pdwAddressOfFunctions = (DWORD *)(pImage +
-        pImageExportDirectory->AddressOfFunctions);
-    USHORT *puAddressOfNameOrdinals = (USHORT *)(pImage +
-        pImageExportDirectory->AddressOfNameOrdinals);
-    for (int i = 0; i < pImageExportDirectory->NumberOfFunctions; i++) {
-        const char *name = (const char *)(pImage + pdwAddressOfNames[i]);
-        unsigned char *addr = pImage + pdwAddressOfFunctions[
-            puAddressOfNameOrdinals[i]];
+    IMAGE_EXPORT_DIRECTORY *export_directory = (IMAGE_EXPORT_DIRECTORY *)(
+        image + data_directory->VirtualAddress);
+    DWORD *address_of_names = (DWORD *)(image +
+        export_directory->AddressOfNames);
+    DWORD *address_of_functions = (DWORD *)(image +
+        export_directory->AddressOfFunctions);
+    USHORT *address_of_name_ordinals = (USHORT *)(image +
+        export_directory->AddressOfNameOrdinals);
+    for (int i = 0; i < export_directory->NumberOfFunctions; i++) {
+        const char *name = (const char *)(image + address_of_names[i]);
+        unsigned char *addr = image + address_of_functions[
+            address_of_name_ordinals[i]];
         if(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2)) {
             // does the signature match?
             // either:   mov eax, syscall_number ; mov ecx, some_value
@@ -721,12 +713,12 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     static BOOL (*pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
     if(pIsWow64Process == NULL) {
         pIsWow64Process = (BOOL(*)(HANDLE, PBOOL)) GetProcAddress(
-            g_hKernel32, "IsWow64Process");
+            g_kernel32, "IsWow64Process");
         assert(pIsWow64Process != NULL);
     }
 
-    BOOL bIsWow64;
-    assert(pIsWow64Process(rr->handle, &bIsWow64) && bIsWow64 != FALSE);
+    BOOL is_wow64;
+    assert(pIsWow64Process(rr->handle, &is_wow64) && is_wow64 != FALSE);
 
     rreat_syshook_t *ret = (rreat_syshook_t *) malloc(sizeof(rreat_syshook_t));
     assert(ret != NULL);

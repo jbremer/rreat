@@ -128,9 +128,6 @@ void rreat_dump_module(rreat_t *rr, addr_t base_addr, const char *filename);
 // attach JIT Debugger to Process
 void rreat_jitdbg_attach(rreat_t *rr);
 
-// create a dummy thread
-int rreat_thread_dummy(rreat_t *rr);
-
 // places the thread in a while(1) loop
 // with a jmp behind it that will point to the original address
 void rreat_thread_while1(rreat_t *rr, int thread_id);
