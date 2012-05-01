@@ -681,9 +681,12 @@ static void _rreat_syshook_enum_syscalls()
         pImageExportDirectory->AddressOfNames);
     DWORD *pdwAddressOfFunctions = (DWORD *)(pImage +
         pImageExportDirectory->AddressOfFunctions);
+    USHORT *puAddressOfNameOrdinals = (USHORT *)(pImage +
+        pImageExportDirectory->AddressOfNameOrdinals);
     for (int i = 0; i < pImageExportDirectory->NumberOfFunctions; i++) {
         const char *name = (const char *)(pImage + pdwAddressOfNames[i]);
-        unsigned char *addr = pImage + pdwAddressOfFunctions[i];
+        unsigned char *addr = pImage + pdwAddressOfFunctions[
+            puAddressOfNameOrdinals[i]];
         if(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2)) {
             // does the signature match?
             // either:   mov eax, syscall_number ; mov ecx, some_value
