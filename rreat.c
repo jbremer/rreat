@@ -10,6 +10,19 @@
 #define EXITERR(msg, ...) _rreat_exit_error(__FUNCTION__, __LINE__, \
         msg, ##__VA_ARGS__)
 
+// _MSC_VER seems to a good indicator for the MSVC compiler, see also
+// http://msdn.microsoft.com/en-us/library/b0084kay(v=vs.80).aspx
+// but I think __MSVC__ is easier to read.
+#ifdef _MSC_VER
+#define __MSVC__
+#endif
+
+#ifdef __MSVC__
+#define NORETURN __declspec(noreturn)
+#else
+#define NORETURN __attribute__((noreturn))
+#endif
+
 static HMODULE g_kernel32;
 static HMODULE g_ntdll;
 
@@ -29,8 +42,8 @@ static inline addr_t __readfsdword(unsigned long index)
 }
 #endif
 
-static __attribute__((noreturn)) void _rreat_exit_error(const char *func,
-    int line, const char *msg, ...)
+static NORETURN void _rreat_exit_error(const char *func, int line,
+    const char *msg, ...)
 {
     va_list args;
     va_start(args, msg);
@@ -676,7 +689,7 @@ static void _rreat_syshook_enum_syscalls()
         export_directory->AddressOfFunctions);
     USHORT *address_of_name_ordinals = (USHORT *)(image +
         export_directory->AddressOfNameOrdinals);
-    for (int i = 0; i < export_directory->NumberOfFunctions; i++) {
+    for (unsigned long i = 0; i < export_directory->NumberOfFunctions; i++) {
         const char *name = (const char *)(image + address_of_names[i]);
         unsigned char *addr = image + address_of_functions[
             address_of_name_ordinals[i]];
