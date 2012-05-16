@@ -18,7 +18,7 @@ along with RREAT.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include <stdio.h>
 #include <windows.h>
-#include "rreat.h"
+#include "../rreat.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
