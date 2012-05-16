@@ -219,8 +219,8 @@ void rreat_detour_remove(rreat_t *rr, rreat_detour_t *detour);
 
 struct _rreat_syshook_t;
 
-typedef void (*rreat_syshook_hook_t)(rreat_t *rr,
-    struct _rreat_syshook_t *syshook, int thread_id);
+typedef void (*rreat_syshook_hook_t)(struct _rreat_syshook_t *syshook,
+    unsigned long *args, int thread_id, int pre_event);
 
 typedef struct _rreat_syshook_t {
     rreat_t *_rr;

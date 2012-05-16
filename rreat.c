@@ -657,7 +657,7 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
     while (WaitForSingleObject(syshook->event_local, INFINITE) ==
             WAIT_OBJECT_0) {
         int thread_id = 0;
-        static int pre_syscall = 1;
+        static int pre_syscall = 1, syscall_number = 0;
         static addr_t arg_addr = 0;
 
         rreat_thread_suspend(syshook->_rr, thread_id);
@@ -676,9 +676,10 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
             arg_addr = ctx.Edx;
             rreat_read(syshook->_rr, ctx.Edx, param, sizeof(param));
 
-            for (int i = 0; i < 16; i++) {
-                printf("param[%d]: %p %d\n", i, param[i], param[i]);
-            }
+            // eax is the system call number
+            syscall_number = ctx.Eax & 0xffff;
+            syshook->callback[syscall_number](syshook, param, thread_id,
+                pre_syscall);
 
             // jump over the infinite loop and execute the actual syscall
             rreat_ip_add(syshook->_rr, thread_id, 2);
@@ -692,10 +693,8 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
             rreat_read(syshook->_rr, arg_addr, param, sizeof(param));
 
-            printf("eax: %p\n", ctx.Eax);
-            for (int i = 0; i < 16; i++) {
-                printf("param[%d]: %p %d\n", i, param[i], param[i]);
-            }
+            syshook->callback[syscall_number](syshook, param, thread_id,
+                pre_syscall);
 
             // jump over the do_not_intervene and notify-event, execute the
             // actual syscall and get a post-event.
