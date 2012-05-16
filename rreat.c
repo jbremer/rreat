@@ -166,11 +166,11 @@ void rreat_ip_add(rreat_t *rr, int thread_id, int delta)
 }
 
 // create a new process object
-rreat_t *rreat_process_init(const char *filename)
+rreat_t *rreat_process_init(const char *filename, char *cmdline)
 {
     STARTUPINFO si = {0}; PROCESS_INFORMATION pi = {0};
-    assert(CreateProcess(filename, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED,
-        NULL, NULL, &si, &pi));
+    assert(CreateProcess(filename, cmdline, NULL, NULL, FALSE,
+        CREATE_SUSPENDED, NULL, NULL, &si, &pi));
     rreat_t *rr = (rreat_t *) calloc(1, sizeof(rreat_t));
     assert(rr != NULL);
 

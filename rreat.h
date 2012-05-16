@@ -123,7 +123,7 @@ void rreat_ip_set(rreat_t *rr, int thread_id, addr_t addr);
 void rreat_ip_add(rreat_t *rr, int thread_id, int delta);
 
 // create a new process object
-rreat_t *rreat_process_init(const char *filename);
+rreat_t *rreat_process_init(const char *filename, char *cmdline);
 
 // attach to a process
 rreat_t *rreat_process_attach(unsigned long pid, unsigned long desired_access);
