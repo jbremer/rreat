@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    rreat_t *rr = rreat_process_init(argv[1]);
+    rreat_t *rr = rreat_process_init(argv[1], NULL);
 
     // wait until the process has initialized (0x401130 = magic value for the
     // entry point)

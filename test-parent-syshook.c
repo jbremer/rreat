@@ -2,12 +2,14 @@
 #include <windows.h>
 #include "rreat.h"
 
-void hook_ZwCreateFile(rreat_t *rr, rreat_syshook_t *syshook, int thread_id)
+void hook_ZwCreateFile(rreat_syshook_t *syshook, unsigned long *args,
+    int thread_id, int pre_event)
 {
 
 }
 
-void hook_ZwClose(rreat_t *rr, rreat_syshook_t *syshook, int thread_id)
+void hook_ZwClose(rreat_syshook_t *syshook, unsigned long *args,
+    int thread_id, int pre_event)
 {
 }
 
@@ -19,7 +21,7 @@ int main(int argc, char *argv[])
     }
 
     rreat_init();
-    rreat_t *rr = rreat_process_init(argv[1]);
+    rreat_t *rr = rreat_process_init(argv[1], NULL);
 
     // wait for oep
     rreat_process_wait_for_address_insert_while1(rr, 0, 0x401130, 1000);
