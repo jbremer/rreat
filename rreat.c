@@ -1001,8 +1001,8 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     // instruction, therefore we have to add 4 to a few instructions.
     OSVERSIONINFOEX OsVersion = {0};
     OsVersion.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-    if(GetVersionEx(&OsVersion) && OsVersion.dwMajorVersion == 6 &&
-            OsVersion.dwMinorVersion == 1) {
+    if(GetVersionEx((OSVERSIONINFO *) &OsVersion) &&
+            OsVersion.dwMajorVersion == 6 && OsVersion.dwMinorVersion == 1) {
         bytes[0x33] += 4;
         bytes[0x37] += 4;
         bytes[0x43] += 4;

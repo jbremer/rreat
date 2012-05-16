@@ -84,12 +84,14 @@ void hook_ZwCreateFile(rreat_syshook_t *syshook, unsigned long *args,
         rreat_read(syshook->_rr, (addr_t) ObjectName.Buffer, wszFileName, len);
         wszFileName[len >> 1] = 0;
 
-        fprintf(stderr, "Opening File: \"%S\" :)\n", wszFileName);
+        fprintf(stderr, "Child %d opens file: \"%S\".\n",
+            syshook->_rr->process_id, wszFileName);
     }
     else {
         CONTEXT ctx; rreat_context_get(syshook->_rr, thread_id, &ctx,
             CONTEXT_FULL);
-        fprintf(stderr, "Return Value: 0x%08x %d\n", ctx.Eax, ctx.Eax);
+        fprintf(stderr, "Child %d return value: 0x%08x %d\n",
+            syshook->_rr->process_id, ctx.Eax, ctx.Eax);
     }
 }
 
@@ -115,6 +117,9 @@ int main(int argc, char *argv[])
 
     // we place a hook at an API of choice.
     rreat_syshook_set_hook(syshook, "ZwCreateFile", &hook_ZwCreateFile);
+
+    fprintf(stderr, "Started hooking child with process identifier: %d\n",
+        rr->process_id);
 
     // resume the childs main thread, with a hook for ZwCreateFile()
     rreat_thread_resume(rr, 0);
