@@ -135,7 +135,7 @@ static NORETURN void _rreat_exit_error(const char *func, int line,
 {
     va_list args;
     va_start(args, msg);
-    fprintf(stderr, "%s:%d (%d) -> ", func, line, GetLastError());
+    fprintf(stderr, "%s:%d (%lu) -> ", func, line, GetLastError());
     vfprintf(stderr, msg, args);
     va_end(args);
     _rreat_backtrace();
@@ -742,7 +742,7 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
             // be instant, but we have to check anyway, because otherwise the
             // stack variabele might be corrupted.)
             assert(rreat_thread_wait_for_address(syshook->_rr, thread_id,
-                syshook->handler + 0x35, 100) == RREAT_SUCCESS);
+                syshook->handler + 0x38, 100) == RREAT_SUCCESS);
 
             CONTEXT ctx; unsigned long param[16];
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
@@ -762,7 +762,7 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
         }
         else {
             assert(rreat_thread_wait_for_address(syshook->_rr, thread_id,
-                syshook->handler + 0x60, 100) == RREAT_SUCCESS);
+                syshook->handler + 0x63, 100) == RREAT_SUCCESS);
 
             CONTEXT ctx; unsigned long param[16];
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
@@ -918,23 +918,30 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     /* 34 */ 0x61,                               // popad
 
              //
+             // due to a difference between windows 7 and windows vista we
+             // to add 4 to esp, on windows 7 here, for vista, we do nothing
+             // here.
+
+    /* 35 */ 0x83, 0xc4, 0x00,                   // add esp, 0x00
+
+             //
              // The parent process will suspend the thread when it's at this
              // infinite loop, so it can alter parameters to the real syscall.
              //
 
-    /* 35 */ 0xeb, 0xfe,                         // while(1);
+    /* 38 */ 0xeb, 0xfe,                         // while(1);
 
              //
              // Perform the real syscall.
              //
 
-    /* 37 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 3a */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
              //
              // For some reason we have to cleanup after this syscall..
              //
 
-    /* 3e */ 0x83, 0xc4, 0x04,                   // add esp, 4
+    /* 41 */ 0x83, 0xc4, 0x04,                   // add esp, 4
 
              //
              // Notify the parent process, this time we give it the so-called
@@ -943,29 +950,29 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
              // variabeles given through a parameter.
              //
 
-    /* 41 */ 0x60,                               // pushad
-    /* 42 */ 0x6a, 0x00,                         // push 0
-    /* 44 */ 0x68, 0x00, 0x00, 0x00, 0x00,       // push notify-event
-    /* 49 */ 0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
-    /* 4e */ 0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
-    /* 53 */ 0x89, 0xe2,                         // mov edx, esp
-    /* 55 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, // far call SetEvent()
+    /* 44 */ 0x60,                               // pushad
+    /* 46 */ 0x6a, 0x00,                         // push 0
+    /* 47 */ 0x68, 0x00, 0x00, 0x00, 0x00,       // push notify-event
+    /* 4c */ 0xb8, 0x00, 0x00, 0x00, 0x00,       // mov eax, syscall_number
+    /* 51 */ 0xb9, 0x07, 0x00, 0x00, 0x00,       // mov ecx, 0x07
+    /* 56 */ 0x89, 0xe2,                         // mov edx, esp
+    /* 58 */ 0x9a, 0x00, 0x00, 0x00, 0x00, 0x00, // far call SetEvent()
                    0x00,
 
              //
              // Again we restore the stack pointer and registers.
              //
 
-    /* 5c */ 0x83, 0xc4, 0x0c,                   // add esp, 0x0c
-    /* 5f */ 0x61,                               // popad
+    /* 5f */ 0x83, 0xc4, 0x0c,                   // add esp, 0x0c
+    /* 62 */ 0x61,                               // popad
 
              //
              // The parent will wait 'till the thread hits this infinite loop,
              // just like it does at the pre-event.
              //
 
-    /* 60 */ 0xeb, 0xfe,                         // while(1);
-    /* 62 */ 0xc3,                               // retn
+    /* 63 */ 0xeb, 0xfe,                         // while(1);
+    /* 65 */ 0xc3,                               // retn
     };
 
     // allocate enough memory for the handler
@@ -974,20 +981,33 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     // overwrite the address for the far jumps
     memcpy(&bytes[0x11], ret->far_jump_address, sizeof(ret->far_jump_address));
     memcpy(&bytes[0x2b], ret->far_jump_address, sizeof(ret->far_jump_address));
-    memcpy(&bytes[0x38], ret->far_jump_address, sizeof(ret->far_jump_address));
-    memcpy(&bytes[0x56], ret->far_jump_address, sizeof(ret->far_jump_address));
+    memcpy(&bytes[0x3b], ret->far_jump_address, sizeof(ret->far_jump_address));
+    memcpy(&bytes[0x59], ret->far_jump_address, sizeof(ret->far_jump_address));
 
     // write address of the table
     *(addr_t *) &bytes[0x07] = ret->table;
 
     // write the the notify-event handles
     *(HANDLE *) &bytes[0x1a] = ret->event_remote;
-    *(HANDLE *) &bytes[0x45] = ret->event_remote;
+    *(HANDLE *) &bytes[0x48] = ret->event_remote;
 
     *(unsigned long *) &bytes[0x1f] =
         _rreat_syshook_syscall_name_to_number("ZwSetEvent");
-    *(unsigned long *) &bytes[0x4a] =
+    *(unsigned long *) &bytes[0x4d] =
         _rreat_syshook_syscall_name_to_number("ZwSetEvent");
+
+    // there is a slight difference between Windows 7 and Windows Vista
+    // in windows 7 each system call is followed by an `add esp, 4'
+    // instruction, therefore we have to add 4 to a few instructions.
+    OSVERSIONINFOEX OsVersion = {0};
+    OsVersion.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
+    if(GetVersionEx(&OsVersion) && OsVersion.dwMajorVersion == 6 &&
+            OsVersion.dwMinorVersion == 1) {
+        bytes[0x33] += 4;
+        bytes[0x37] += 4;
+        bytes[0x43] += 4;
+        bytes[0x61] += 4;
+    }
 
     // clear the entire lookup table
     unsigned char null[64] = {0};
