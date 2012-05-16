@@ -66,6 +66,11 @@ static inline addr_t __readfsdword(unsigned long index)
 }
 #endif
 
+static inline unsigned long MIN(unsigned long a, unsigned long b)
+{
+    return a < b ? a : b;
+}
+
 #ifdef __MSVC__
 
 // credits go to:
@@ -798,7 +803,9 @@ static void _rreat_syshook_enum_syscalls()
         export_directory->AddressOfFunctions);
     USHORT *address_of_name_ordinals = (USHORT *)(image +
         export_directory->AddressOfNameOrdinals);
-    for (unsigned long i = 0; i < export_directory->NumberOfFunctions; i++) {
+    unsigned long number_of_names = MIN(export_directory->NumberOfFunctions,
+        export_directory->NumberOfNames);
+    for (unsigned long i = 0; i < number_of_names; i++) {
         const char *name = (const char *)(image + address_of_names[i]);
         unsigned char *addr = image + address_of_functions[
             address_of_name_ordinals[i]];
@@ -832,9 +839,9 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     _rreat_syshook_enum_syscalls();
 
     // x86_64 support only, at the moment.
-    static BOOL (*pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
+    static BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
     if(pIsWow64Process == NULL) {
-        pIsWow64Process = (BOOL(*)(HANDLE, PBOOL)) GetProcAddress(
+        pIsWow64Process = (BOOL(WINAPI *)(HANDLE, PBOOL)) GetProcAddress(
             g_kernel32, "IsWow64Process");
         assert(pIsWow64Process != NULL);
     }
