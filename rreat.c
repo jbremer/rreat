@@ -20,6 +20,7 @@ along with RREAT.  If not, see <http://www.gnu.org/licenses/>.
 #include <stdio.h>
 #include <windows.h>
 #include <psapi.h>
+#include <dbghelp.h>
 #include "rreat.h"
 
 #define assert(expr) if((expr) == 0) EXITERR("%s", #expr)
@@ -44,6 +45,10 @@ along with RREAT.  If not, see <http://www.gnu.org/licenses/>.
 static HMODULE g_kernel32;
 static HMODULE g_ntdll;
 
+#ifdef __MSVC__
+static HMODULE g_dbghelp;
+#endif
+
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
 static unsigned long roundup2(unsigned long v)
@@ -61,6 +66,65 @@ static inline addr_t __readfsdword(unsigned long index)
 }
 #endif
 
+#ifdef __MSVC__
+
+// credits go to:
+// http://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
+void _rreat_backtrace(void)
+{
+    void *stack[32]; SYMBOL_INFO *symbol; int frames;
+    char buf[sizeof(SYMBOL_INFO) + 256];
+
+    static USHORT (WINAPI *pCaptureStackBackTrace)(ULONG FramesToSkip,
+        ULONG FramesToCapture, PVOID *BackTrace, PULONG BackTraceHash);
+
+    static BOOL (WINAPI *pSymInitialize)(HANDLE hProcess,
+        const char *UserSearchPath, BOOL fInvadeProcess);
+
+    static BOOL (WINAPI *pSymCleanup)(HANDLE hProcess);
+
+    static BOOL (WINAPI *pSymFromAddr)(HANDLE hProcess, DWORD64 Address,
+        PDWORD64 Displacement, PSYMBOL_INFO Symbol);
+
+    if(pSymInitialize == NULL) {
+        pCaptureStackBackTrace = (USHORT(WINAPI *)(ULONG, ULONG, PVOID *,
+            PULONG)) GetProcAddress(g_kernel32, "RtlCaptureStackBackTrace");
+
+        pSymInitialize = (BOOL(WINAPI *)(HANDLE, const char *, BOOL))
+            GetProcAddress(g_dbghelp, "SymInitialize");
+
+        pSymCleanup = (BOOL(WINAPI *)(HANDLE)) GetProcAddress(g_dbghelp,
+            "SymCleanup");
+
+        pSymFromAddr = (BOOL(WINAPI *)(HANDLE, DWORD64, PDWORD64,
+            PSYMBOL_INFO)) GetProcAddress(g_dbghelp, "SymFromAddr");
+    }
+
+    pSymInitialize(GetCurrentProcess(), NULL, TRUE);
+
+    frames = pCaptureStackBackTrace(0, 32, stack, NULL);
+    symbol = (SYMBOL_INFO *) buf;
+
+    memset(symbol, 0, sizeof(buf));
+    symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    symbol->MaxNameLen = 255;
+
+    for (int i = 0; i < frames; i++) {
+        pSymFromAddr(GetCurrentProcess(), (DWORD64) stack[i], NULL, symbol);
+        printf("%s (0x%08x)\n", symbol->Name, symbol->Address);
+    }
+
+    pSymCleanup(GetCurrentProcess());
+}
+
+#else
+
+void _rreat_backtrace()
+{
+}
+
+#endif
+
 static NORETURN void _rreat_exit_error(const char *func, int line,
     const char *msg, ...)
 {
@@ -69,6 +133,7 @@ static NORETURN void _rreat_exit_error(const char *func, int line,
     fprintf(stderr, "%s:%d (%d) -> ", func, line, GetLastError());
     vfprintf(stderr, msg, args);
     va_end(args);
+    _rreat_backtrace();
     // TODO: cleanup
     ExitProcess(0);
 }
@@ -78,6 +143,11 @@ void rreat_init()
     g_kernel32 = GetModuleHandle("kernel32.dll");
     g_ntdll = GetModuleHandle("ntdll.dll");
     assert(g_kernel32 != NULL && g_ntdll != NULL);
+
+#ifdef __MSVC__
+    g_dbghelp = LoadLibrary("dbghelp.dll");
+    assert(g_dbghelp != NULL);
+#endif
 }
 
 //
