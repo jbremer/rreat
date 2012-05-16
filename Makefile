@@ -4,7 +4,7 @@ LIBS = -lpsapi
 
 all: rreat.o
 
-rreat.o: rreat.c
+rreat.o: rreat.c config.h
 	$(CC) $(CFLAGS) -c $^
 
 %.exe: %.c rreat.o
