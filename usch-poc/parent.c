@@ -121,4 +121,6 @@ int main(int argc, char *argv[])
 
     // wait until the childs main thread exits
     WaitForSingleObject(rr->threads[0].handle, INFINITE);
+
+    // im terribly sorry for not cleaning up my mess.
 }
