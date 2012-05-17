@@ -838,7 +838,7 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
 {
     _rreat_syshook_enum_syscalls();
 
-    // x86_64 support only, at the moment.
+    // WOW64 support only, at the moment.
     static BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
     if(pIsWow64Process == NULL) {
         pIsWow64Process = (BOOL(WINAPI *)(HANDLE, PBOOL)) GetProcAddress(
