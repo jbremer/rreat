@@ -815,23 +815,28 @@ static void _rreat_syshook_enum_syscalls()
             // or:       mov eax, syscall_number ; xor ecx, ecx
             if(*addr == 0xb8 && (addr[5] == 0xb9 || addr[5] == 0x33)) {
                 unsigned long syscall_number = *(unsigned long *)(addr + 1);
-                g_syshook_names[syscall_number] = name + 2;
+                g_syshook_names[syscall_number] = name;
             }
         }
     }
 }
 
-static unsigned short _rreat_syshook_syscall_name_to_number(const char *name)
+unsigned short rreat_syshook_syscall_name_to_number(const char *name)
 {
     assert(name != NULL);
     assert(!memcmp(name, "Zw", 2) || !memcmp(name, "Nt", 2));
     for (int i = 0; i < 64 * 1024; i++) {
         if(g_syshook_names[i] != NULL &&
-                !strcmp(g_syshook_names[i], name + 2)) {
+                !strcmp(g_syshook_names[i] + 2, name + 2)) {
             return (unsigned short) i;
         }
     }
     raise("Syscall name `%s' not found.", name);
+}
+
+const char *rreat_syshook_syscall_number_to_name(unsigned short number)
+{
+    return g_syshook_names[number];
 }
 
 rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
@@ -992,9 +997,9 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     *(HANDLE *) &bytes[0x48] = ret->event_remote;
 
     *(unsigned long *) &bytes[0x1f] =
-        _rreat_syshook_syscall_name_to_number("ZwSetEvent");
+        rreat_syshook_syscall_name_to_number("ZwSetEvent");
     *(unsigned long *) &bytes[0x4d] =
-        _rreat_syshook_syscall_name_to_number("ZwSetEvent");
+        rreat_syshook_syscall_name_to_number("ZwSetEvent");
 
     // there is a slight difference between Windows 7 and Windows Vista
     // in windows 7 each system call is followed by an `add esp, 4'
@@ -1034,7 +1039,7 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
 void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
     rreat_syshook_hook_t hook)
 {
-    int index = _rreat_syshook_syscall_name_to_number(name);
+    int index = rreat_syshook_syscall_name_to_number(name);
 
     syshook->callback[index] = hook;
 
@@ -1045,7 +1050,7 @@ void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
 
 void rreat_syshook_unset_hook(rreat_syshook_t *syshook, const char *name)
 {
-    int index = _rreat_syshook_syscall_name_to_number(name);
+    int index = rreat_syshook_syscall_name_to_number(name);
 
     syshook->callback[index] = NULL;
 

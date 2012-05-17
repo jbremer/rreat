@@ -241,6 +241,8 @@ typedef struct _rreat_syshook_t {
 } rreat_syshook_t;
 
 rreat_syshook_t *rreat_syshook_init(rreat_t *rr);
+unsigned short rreat_syshook_syscall_name_to_number(const char *name);
+const char *rreat_syshook_syscall_number_to_name(unsigned short number);
 void rreat_syshook_set_hook(rreat_syshook_t *syshook, const char *name,
     rreat_syshook_hook_t hook);
 void rreat_syshook_unset_hook(rreat_syshook_t *syshook, const char *name);
