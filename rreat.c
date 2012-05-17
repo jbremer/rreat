@@ -753,8 +753,15 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
 
             // eax is the system call number
             syscall_number = ctx.Eax & 0xffff;
-            syshook->callback[syscall_number](syshook, param, thread_id,
-                pre_syscall);
+
+            if(syshook->callback[syscall_number] != NULL) {
+                syshook->callback[syscall_number](syshook, param, thread_id,
+                    pre_syscall);
+            }
+            else {
+                syshook->default_callback(syshook, syscall_number, param,
+                    thread_id, pre_syscall);
+            }
 
             // jump over the infinite loop and execute the actual syscall
             rreat_ip_add(syshook->_rr, thread_id, 2);
@@ -768,8 +775,14 @@ static DWORD WINAPI _rreat_syshook_worker(LPVOID _syshook)
             rreat_context_get(syshook->_rr, thread_id, &ctx, CONTEXT_FULL);
             rreat_read(syshook->_rr, arg_addr, param, sizeof(param));
 
-            syshook->callback[syscall_number](syshook, param, thread_id,
-                pre_syscall);
+            if(syshook->callback[syscall_number] != NULL) {
+                syshook->callback[syscall_number](syshook, param, thread_id,
+                    pre_syscall);
+            }
+            else {
+                syshook->default_callback(syshook, syscall_number, param,
+                    thread_id, pre_syscall);
+            }
 
             // jump over the do_not_intervene and notify-event, execute the
             // actual syscall and get a post-event.
@@ -1059,3 +1072,15 @@ void rreat_syshook_unset_hook(rreat_syshook_t *syshook, const char *name)
     rreat_write(syshook->_rr, syshook->table + index, &state, sizeof(state));
 }
 
+void rreat_syshook_default_hook(rreat_syshook_t *syshook,
+    rreat_syshook_default_hook_t hook)
+{
+    unsigned char one[64];
+    memset(one, 1, sizeof(one));
+
+    syshook->default_callback = hook;
+
+    for (int i = 0; i < 1024; i++) {
+        rreat_write(syshook->_rr, syshook->table + 64 * i, one, sizeof(one));
+    }
+}

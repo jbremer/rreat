@@ -222,6 +222,10 @@ struct _rreat_syshook_t;
 typedef void (*rreat_syshook_hook_t)(struct _rreat_syshook_t *syshook,
     unsigned long *args, int thread_id, int pre_event);
 
+typedef void (*rreat_syshook_default_hook_t)(struct _rreat_syshook_t *syshook,
+    unsigned long syscall_number, unsigned long *args, int thread_id,
+    int pre_event);
+
 typedef struct _rreat_syshook_t {
     rreat_t *_rr;
     // jump instruction with segment prefix (that makes seven bytes.)
@@ -236,6 +240,9 @@ typedef struct _rreat_syshook_t {
     addr_t table;
     // handler in the child which will handle each syscall
     addr_t handler;
+    // if installed, will be called if no the syscall isnt defined in the
+    // `callback' table.
+    rreat_syshook_default_hook_t default_callback;
     // lookup table in the parent, which holds callbacks
     rreat_syshook_hook_t callback[64 * 1024];
 } rreat_syshook_t;
