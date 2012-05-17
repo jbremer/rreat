@@ -164,6 +164,9 @@ int rreat_thread_wait_for_address(rreat_t *rr, int thread_id, addr_t addr,
 int rreat_process_wait_for_address_insert_while1(rreat_t *rr, int thread_id,
     addr_t addr, int milliseconds);
 
+// get the address of a function
+addr_t rreat_get_address(const char *library, const char *function);
+
 //
 // RREAT Simulate API
 //

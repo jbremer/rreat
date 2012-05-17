@@ -42,13 +42,6 @@ along with RREAT.  If not, see <http://www.gnu.org/licenses/>.
 #define NORETURN __attribute__((noreturn))
 #endif
 
-static HMODULE g_kernel32;
-static HMODULE g_ntdll;
-
-#ifdef __MSVC__
-static HMODULE g_dbghelp;
-#endif
-
 // rounds v up to the next highest power of 2
 // http://www-graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
 static unsigned long roundup2(unsigned long v)
@@ -93,16 +86,16 @@ void _rreat_backtrace(void)
 
     if(pSymInitialize == NULL) {
         pCaptureStackBackTrace = (USHORT(WINAPI *)(ULONG, ULONG, PVOID *,
-            PULONG)) GetProcAddress(g_kernel32, "RtlCaptureStackBackTrace");
+            PULONG)) rreat_get_address("kernel32", "RtlCaptureStackBackTrace");
 
         pSymInitialize = (BOOL(WINAPI *)(HANDLE, const char *, BOOL))
-            GetProcAddress(g_dbghelp, "SymInitialize");
+            rreat_get_address("dbghelp", "SymInitialize");
 
-        pSymCleanup = (BOOL(WINAPI *)(HANDLE)) GetProcAddress(g_dbghelp,
+        pSymCleanup = (BOOL(WINAPI *)(HANDLE)) rreat_get_address("dbghelp",
             "SymCleanup");
 
         pSymFromAddr = (BOOL(WINAPI *)(HANDLE, DWORD64, PDWORD64,
-            PSYMBOL_INFO)) GetProcAddress(g_dbghelp, "SymFromAddr");
+            PSYMBOL_INFO)) rreat_get_address("dbghelp", "SymFromAddr");
     }
 
     pSymInitialize(GetCurrentProcess(), NULL, TRUE);
@@ -145,14 +138,6 @@ static NORETURN void _rreat_exit_error(const char *func, int line,
 
 void rreat_init()
 {
-    g_kernel32 = GetModuleHandle("kernel32.dll");
-    g_ntdll = GetModuleHandle("ntdll.dll");
-    assert(g_kernel32 != NULL && g_ntdll != NULL);
-
-#ifdef __MSVC__
-    g_dbghelp = LoadLibrary("dbghelp.dll");
-    assert(g_dbghelp != NULL);
-#endif
 }
 
 //
@@ -405,6 +390,23 @@ int rreat_process_wait_for_address_insert_while1(rreat_t *rr, int thread_id,
     return ret;
 }
 
+// get the address of a function
+addr_t rreat_get_address(const char *library, const char *function)
+{
+    HMODULE handle = LoadLibrary(library);
+    assert(handle != NULL);
+
+    // a module handle is requested
+    if(function == NULL) {
+        return (addr_t) handle;
+    }
+
+    FARPROC addr = GetProcAddress(handle, function);
+    assert(addr != NULL);
+
+    return (addr_t) addr;
+}
+
 //
 // RREAT Simulate API
 //
@@ -601,15 +603,15 @@ rreat_veh_t *rreat_veh_install(rreat_t *rr, addr_t addr, int first_handler)
     addr_t mem = rreat_alloc(rr, sizeof(install) + sizeof(remove), RREAT_RWX);
 
     // store address of AddVectoredExceptionHandler
-    *(addr_t *) &install[1] = (addr_t) GetProcAddress(g_kernel32,
-        "AddVectoredExceptionHandler");
+    *(addr_t *) &install[1] = (addr_t) rreat_get_address("ntdll",
+        "RtlAddVectoredExceptionHandler");
 
     // store address of the exception handler
     *(addr_t *) &install[6] = addr;
 
     // store the address of RemoveVectoredExceptionHandler
-    *(addr_t *) &remove[1] = (addr_t) GetProcAddress(g_kernel32,
-        "RemoveVectoredExceptionHandler");
+    *(addr_t *) &remove[1] = (addr_t) rreat_get_address("ntdll",
+        "RtlRemoveVectoredExceptionHandler");
 
     // store the address where to write the handle to the exception handler
     // this can be used later to uninstall the exception handler
@@ -802,7 +804,7 @@ static void _rreat_syshook_enum_syscalls()
 
     // no boundary checking at all, I assume ntdll is not malicious..
     // besides that, we are in our own process, _should_ be fine..
-    BYTE *image = (BYTE *) g_ntdll;
+    BYTE *image = (BYTE *) rreat_get_address("ntdll", NULL);
     IMAGE_DOS_HEADER *dos_header = (IMAGE_DOS_HEADER *) image;
     IMAGE_NT_HEADERS *nt_headers = (IMAGE_NT_HEADERS *)(image +
         dos_header->e_lfanew);
@@ -859,8 +861,8 @@ rreat_syshook_t *rreat_syshook_init(rreat_t *rr)
     // WOW64 support only, at the moment.
     static BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, BOOL *pbIsWow64);
     if(pIsWow64Process == NULL) {
-        pIsWow64Process = (BOOL(WINAPI *)(HANDLE, PBOOL)) GetProcAddress(
-            g_kernel32, "IsWow64Process");
+        pIsWow64Process = (BOOL(WINAPI *)(HANDLE, PBOOL)) rreat_get_address(
+            "kernel32", "IsWow64Process");
         assert(pIsWow64Process != NULL);
     }
 
